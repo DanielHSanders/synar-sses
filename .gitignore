@@ -1,0 +1,35 @@
+# Credentials and secrets — never commit
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+*.tmp
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# Claude Code per-user state
+.claude/settings.local.json
+
+# .NET build artifacts
+bin/
+obj/
+*.user
+.vs/
+publish/
+appsettings.Development.json
+appsettings.Local.json
+
+# Local reference materials (xlsm, manuals, known-good xlsx) — kept in
+# Synar/SSES/ sibling folder, never copied into the repo
+reference/
+
+# Python
+.venv/
+__pycache__/
+*.pyc

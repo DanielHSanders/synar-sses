@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SynarSSES.Core/SynarSSES.Core.csproj" />
+  <Project Path="SynarSSES.Web/SynarSSES.Web.csproj" />
+  <Project Path="SynarSSES.Tests/SynarSSES.Tests.csproj" />
+</Solution>

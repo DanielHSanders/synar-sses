@@ -1,0 +1,54 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "SSES Report Generator";
+}
+
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <h1 class="display-5 mb-3">SSES Report Generator</h1>
+        <p class="lead">
+            Generate the SAMHSA Synar Survey Estimation System (SSES) workbook for a
+            given check year. The app reads inspection data from <code>synarcheck</code>
+            and inspector demographics from <code>synar_inspector</code>, computes the
+            Stratified-SRS-with-FPC variance estimator that the legacy SSES program
+            uses, and writes the result as an .xlsx file in the standard
+            SAMHSA layout (Tables 1&ndash;8).
+        </p>
+
+        <form method="post" class="mt-4">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label asp-for="StateCode" class="form-label">State</label>
+                    <input asp-for="StateCode" class="form-control" maxlength="2" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="CheckYear" class="form-label">Check Year</label>
+                    <input asp-for="CheckYear" type="number" min="2000" max="2099" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="FederalFiscalYear" class="form-label">FFY</label>
+                    <input asp-for="FederalFiscalYear" type="number" min="2000" max="2099" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="FrameSize" class="form-label">Frame Size</label>
+                    <input asp-for="FrameSize" type="number" min="1" class="form-control" />
+                </div>
+            </div>
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    Generate &amp; Download SSES Workbook
+                </button>
+            </div>
+        </form>
+
+        <hr class="my-5" />
+        <small class="text-muted">
+            This is a web replacement for the legacy <code>SSES_v7_0.xlsm</code>
+            macro-enabled workbook that ships from SAMHSA. The math is a port of
+            the original VBA Taylor-linearization variance estimator; the output
+            matches the legacy program byte-for-byte on Kentucky's 2025
+            submission.
+        </small>
+    </div>
+</div>

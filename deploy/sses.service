@@ -1,0 +1,36 @@
+[Unit]
+Description=Synar SSES report generator
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=synar
+Group=synar
+WorkingDirectory=/opt/sses/app
+ExecStart=/usr/bin/dotnet /opt/sses/app/SynarSSES.Web.dll --urls http://127.0.0.1:5001
+Restart=on-failure
+RestartSec=5
+
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+Environment=DOTNET_NOLOGO=true
+Environment=ASPNETCORE_DETAILEDERRORS=false
+EnvironmentFile=-/etc/sses/sses.env
+
+# Hardening (same profile as synarmatcher.service)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/sses/app
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
