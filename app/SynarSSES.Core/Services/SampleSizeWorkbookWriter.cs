@@ -10,11 +10,11 @@ public sealed class SampleSizeWorkbookWriter
 {
     public byte[] Write(SampleSizeResult result, IReadOnlyList<SampledOutlet> drawn,
                        CheckTypeAssignmentSummary assignment,
-                       int checkYear, string stateCode)
+                       int checkYear, string stateCode, int firstSynarcheckId)
     {
         using var wb = new XLWorkbook();
         WriteCalculation(wb.AddWorksheet("Calculation"), result, assignment, checkYear, stateCode);
-        WriteSample(wb.AddWorksheet("Sample"), drawn);
+        WriteSynarcheck(wb.AddWorksheet("synarcheck"), drawn, checkYear, firstSynarcheckId);
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         return ms.ToArray();
@@ -59,30 +59,38 @@ public sealed class SampleSizeWorkbookWriter
         ws.Columns("A:C").AdjustToContents();
     }
 
-    private static void WriteSample(IXLWorksheet ws, IReadOnlyList<SampledOutlet> drawn)
+    // Output sheet matches the synarcheck table 1:1 so it can be loaded
+    // directly. Sample-time fields (synarcheckid, checkyear, synarfullid,
+    // synarmapsid, checktype) are populated; the inspection-result fields
+    // (officer, ia, soldtobacco, ineligible, ineligiblereason, status,
+    // inspectiondate, iaage, four9byid) are left blank for the inspection
+    // team to fill in later.
+    private static void WriteSynarcheck(IXLWorksheet ws, IReadOnlyList<SampledOutlet> drawn,
+                                        int checkYear, int firstSynarcheckId)
     {
         var headers = new[]
         {
-            "Synar Maps ID", "Name", "Address", "City", "State", "Zip",
-            "Latitude", "Longitude", "Business Type", "CheckType",
+            "synarcheckid", "checkyear", "synarfullid", "four9byid", "synarmapsid",
+            "checktype", "officer", "ia", "soldtobacco", "ineligible",
+            "ineligiblereason", "status", "inspectiondate", "iaage",
         };
         for (var i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
 
+        var yy = checkYear % 100;
+        var id = firstSynarcheckId;
         var row = 2;
         foreach (var o in drawn)
         {
-            ws.Cell(row, 1).Value = o.SynarMapsId;
-            ws.Cell(row, 2).Value = o.Name;
-            ws.Cell(row, 3).Value = o.Address;
-            ws.Cell(row, 4).Value = o.City;
-            ws.Cell(row, 5).Value = o.State;
-            ws.Cell(row, 6).Value = o.Zip;
-            ws.Cell(row, 7).Value = o.Latitude;
-            ws.Cell(row, 8).Value = o.Longitude;
-            ws.Cell(row, 9).Value = o.BusinessType ?? "";
-            ws.Cell(row, 10).Value = o.CheckType ?? "";
+            ws.Cell(row, 1).Value  = id++;
+            ws.Cell(row, 2).Value  = checkYear;
+            ws.Cell(row, 3).Value  = $"SY{yy:D2}-{o.SynarMapsId}";
+            // col 4 four9byid -- blank
+            ws.Cell(row, 5).Value  = o.SynarMapsId;
+            ws.Cell(row, 6).Value  = o.CheckType ?? "";
+            // cols 7-14 left blank: officer, ia, soldtobacco, ineligible,
+            // ineligiblereason, status, inspectiondate, iaage
             row++;
         }
-        ws.Columns("A:J").AdjustToContents();
+        ws.Columns("A:N").AdjustToContents();
     }
 }

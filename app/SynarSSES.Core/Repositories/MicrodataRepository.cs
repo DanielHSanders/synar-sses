@@ -22,6 +22,16 @@ public sealed class MicrodataRepository
     // microdata shape. `samplingFrameSize` is the count of outlets in the
     // sampling frame for the year (the population N). For KY-2025 this is
     // 4452, matching `Synar2025_SSES_Final.xlsx` Table 2.
+    // The largest synarcheckid currently in the table. New rows must be
+    // assigned ids starting from this + 1 because the column is NOT NULL and
+    // has no GENERATED clause.
+    public async Task<int> GetMaxSynarcheckIdAsync()
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var v = await conn.ExecuteScalarAsync<int?>("SELECT max(synarcheckid) FROM synarcheck");
+        return v ?? 0;
+    }
+
     // Compute the headline rates from a prior year of synarcheck data, used
     // as planning defaults on the sample-size page. KY's data has no N* rows
     // (synarcheck only tracks inspections that actually happened plus

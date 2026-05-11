@@ -79,7 +79,11 @@ public class SampleSizeModel : PageModel
         var assignment = _assigner.Assign(drawn,
             CigarettePercent, SmokelessPercent, ElectronicPercent, MentholPercent);
 
-        var bytes = _writer.Write(result, drawn, assignment, PlanningYear, StateCode);
+        // synarcheckid is NOT NULL with no auto-generation; assign the next
+        // block sequentially from max+1 so the xlsx can be loaded directly.
+        var firstId = await _microdataRepo.GetMaxSynarcheckIdAsync() + 1;
+
+        var bytes = _writer.Write(result, drawn, assignment, PlanningYear, StateCode, firstId);
         var fileName = $"SynarSample{PlanningYear}_{DateTime.UtcNow:yyyyMMddHHmmss}.xlsx";
         return File(bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
