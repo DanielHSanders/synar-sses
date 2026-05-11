@@ -31,7 +31,9 @@ INSERT INTO synar_inspector (check_year, ia_code, gender, age) VALUES
   (2025, '032-11', 'F', 19),
   (2025, '042-24', 'M', 19),
   (2025, '022-53', 'M', 17),
-  (2025, '063-02', 'M', 19),
+  -- 063-02 appears twice in the IA Ratio source (M18 and M19; inspector aged
+  -- during the year). Gender is identical so we keep one row; per-inspection
+  -- age comes from synarcheck.iaage at calculation time.
   (2025, '025-59', 'M', 19),
   (2025, '118-26', 'M', 19),
   (2025, '076-67', 'F', 20),
