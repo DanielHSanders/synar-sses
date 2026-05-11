@@ -9,17 +9,19 @@ namespace SynarSSES.Core.Services;
 public sealed class SampleSizeWorkbookWriter
 {
     public byte[] Write(SampleSizeResult result, IReadOnlyList<SampledOutlet> drawn,
+                       CheckTypeAssignmentSummary assignment,
                        int checkYear, string stateCode)
     {
         using var wb = new XLWorkbook();
-        WriteCalculation(wb.AddWorksheet("Calculation"), result, checkYear, stateCode);
+        WriteCalculation(wb.AddWorksheet("Calculation"), result, assignment, checkYear, stateCode);
         WriteSample(wb.AddWorksheet("Sample"), drawn);
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         return ms.ToArray();
     }
 
-    private static void WriteCalculation(IXLWorksheet ws, SampleSizeResult r, int year, string state)
+    private static void WriteCalculation(IXLWorksheet ws, SampleSizeResult r,
+        CheckTypeAssignmentSummary a, int year, string state)
     {
         ws.Cell("A1").Value = "SSES Sample Size Calculation";
         ws.Cell("A3").Value = "State";                       ws.Cell("B3").Value = state;
@@ -42,7 +44,19 @@ public sealed class SampleSizeWorkbookWriter
         ws.Cell("A20").Value = "Original Sample Size";       ws.Cell("B20").Value = r.OriginalSampleSize;
         ws.Cell("A21").Value = "(Use the Original Sample Size on the Sample sheet.)";
 
-        ws.Columns("A:B").AdjustToContents();
+        ws.Cell("A23").Value = "CheckType Assignment";
+        ws.Cell("A24").Value = "Category";   ws.Cell("B24").Value = "Target"; ws.Cell("C24").Value = "Assigned";
+        ws.Cell("A25").Value = "Cigarette";  ws.Cell("B25").Value = a.CigaretteTarget;  ws.Cell("C25").Value = a.CigaretteCount;
+        ws.Cell("A26").Value = "Smokeless";  ws.Cell("B26").Value = a.SmokelessTarget;  ws.Cell("C26").Value = a.SmokelessCount;
+        ws.Cell("A27").Value = "Electronic"; ws.Cell("B27").Value = a.ElectronicTarget; ws.Cell("C27").Value = a.ElectronicCount;
+        ws.Cell("A28").Value = "Menthol";    ws.Cell("B28").Value = a.MentholTarget;    ws.Cell("C28").Value = a.MentholCount;
+        if (!string.IsNullOrEmpty(a.ElectronicWarning))
+        {
+            ws.Cell("A30").Value = "Warning";
+            ws.Cell("B30").Value = a.ElectronicWarning;
+        }
+
+        ws.Columns("A:C").AdjustToContents();
     }
 
     private static void WriteSample(IXLWorksheet ws, IReadOnlyList<SampledOutlet> drawn)
@@ -50,7 +64,7 @@ public sealed class SampleSizeWorkbookWriter
         var headers = new[]
         {
             "Synar Maps ID", "Name", "Address", "City", "State", "Zip",
-            "Latitude", "Longitude", "Business Type",
+            "Latitude", "Longitude", "Business Type", "CheckType",
         };
         for (var i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
 
@@ -66,8 +80,9 @@ public sealed class SampleSizeWorkbookWriter
             ws.Cell(row, 7).Value = o.Latitude;
             ws.Cell(row, 8).Value = o.Longitude;
             ws.Cell(row, 9).Value = o.BusinessType ?? "";
+            ws.Cell(row, 10).Value = o.CheckType ?? "";
             row++;
         }
-        ws.Columns("A:I").AdjustToContents();
+        ws.Columns("A:J").AdjustToContents();
     }
 }

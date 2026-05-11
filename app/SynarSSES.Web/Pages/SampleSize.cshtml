@@ -74,6 +74,34 @@
                 </div>
             </div>
 
+            <hr class="mt-4 mb-3" />
+            <h5>CheckType target distribution</h5>
+            <p class="text-muted small mb-2">
+                Vape outlets and Tobacco Shops are always assigned to Electronic.
+                Additional Electronic checks (if needed to hit quota) come from
+                Gas Stations. Remaining outlets are split into Cigarette,
+                Smokeless, and Menthol using the within-business-type weights
+                observed in 2025.
+            </p>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label asp-for="CigarettePercent" class="form-label">Cigarette (%)</label>
+                    <input asp-for="CigarettePercent" type="number" step="0.1" min="0" max="100" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="SmokelessPercent" class="form-label">Smokeless (%)</label>
+                    <input asp-for="SmokelessPercent" type="number" step="0.1" min="0" max="100" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="ElectronicPercent" class="form-label">Electronic (%)</label>
+                    <input asp-for="ElectronicPercent" type="number" step="0.1" min="0" max="100" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="MentholPercent" class="form-label">Menthol (%)</label>
+                    <input asp-for="MentholPercent" type="number" step="0.1" min="0" max="100" class="form-control" />
+                </div>
+            </div>
+
             <div class="mt-4">
                 <button type="submit" class="btn btn-primary btn-lg">
                     Compute &amp; Download Sample

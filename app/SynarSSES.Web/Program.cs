@@ -31,6 +31,7 @@ builder.Services.AddSingleton<SssCalculator>();
 builder.Services.AddSingleton<SssWorkbookWriter>();
 builder.Services.AddSingleton<SampleSizeCalculator>();
 builder.Services.AddSingleton<SampleDrawer>();
+builder.Services.AddSingleton<CheckTypeAssigner>();
 builder.Services.AddSingleton<SampleSizeWorkbookWriter>();
 
 var app = builder.Build();

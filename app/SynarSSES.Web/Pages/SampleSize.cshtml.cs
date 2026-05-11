@@ -12,6 +12,7 @@ public class SampleSizeModel : PageModel
     private readonly MapLocationRepository _mapRepo;
     private readonly SampleSizeCalculator _calculator;
     private readonly SampleDrawer _drawer;
+    private readonly CheckTypeAssigner _assigner;
     private readonly SampleSizeWorkbookWriter _writer;
 
     public SampleSizeModel(
@@ -19,12 +20,14 @@ public class SampleSizeModel : PageModel
         MapLocationRepository mapRepo,
         SampleSizeCalculator calculator,
         SampleDrawer drawer,
+        CheckTypeAssigner assigner,
         SampleSizeWorkbookWriter writer)
     {
         _microdataRepo = microdataRepo;
         _mapRepo = mapRepo;
         _calculator = calculator;
         _drawer = drawer;
+        _assigner = assigner;
         _writer = writer;
     }
 
@@ -37,6 +40,10 @@ public class SampleSizeModel : PageModel
     [BindProperty] public double CompletionRatePercent { get; set; } = 100.0;
     [BindProperty] public double SafetyMarginPercent { get; set; } = 0.0;
     [BindProperty] public bool UseOneSidedCi { get; set; } = true;
+    [BindProperty] public double CigarettePercent  { get; set; } = 37.5;
+    [BindProperty] public double SmokelessPercent  { get; set; } = 32.5;
+    [BindProperty] public double ElectronicPercent { get; set; } = 20.0;
+    [BindProperty] public double MentholPercent    { get; set; } = 10.0;
 
     public PriorYearStats? PriorYear { get; set; }
 
@@ -69,8 +76,10 @@ public class SampleSizeModel : PageModel
         var result = _calculator.Compute(input);
         var frame = await _mapRepo.GetValidOutletsAsync();
         var drawn = _drawer.Draw(frame, Math.Min(result.OriginalSampleSize, frame.Count));
+        var assignment = _assigner.Assign(drawn,
+            CigarettePercent, SmokelessPercent, ElectronicPercent, MentholPercent);
 
-        var bytes = _writer.Write(result, drawn, PlanningYear, StateCode);
+        var bytes = _writer.Write(result, drawn, assignment, PlanningYear, StateCode);
         var fileName = $"SynarSample{PlanningYear}_{DateTime.UtcNow:yyyyMMddHHmmss}.xlsx";
         return File(bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
