@@ -1,0 +1,93 @@
+@page
+@model SampleSizeModel
+@{
+    ViewData["Title"] = "Sample Size Calculator";
+}
+
+<div class="row">
+    <div class="col-md-9 mx-auto">
+        <h1 class="display-5 mb-3">Sample Size &amp; Draw</h1>
+        <p class="lead">
+            Compute the planned original sample size for the upcoming Synar survey,
+            then draw that many outlets at random from the current
+            <code>map_location</code> Valid-status frame. Defaults below are pulled
+            from the prior year's <code>synarcheck</code> results.
+        </p>
+
+        @if (Model.PriorYear is not null)
+        {
+            var py = Model.PriorYear;
+            <div class="alert alert-secondary small">
+                <strong>Prior-year reference (@py.CheckYear):</strong>
+                @py.TotalInspections inspections,
+                @py.EligibleComplete eligible-complete,
+                @py.ViolationCount violations
+                (RVR @py.ViolationRatePercent.ToString("0.00")%,
+                 accuracy @py.AccuracyRatePercent.ToString("0.00")%).
+            </div>
+        }
+
+        <form method="post" class="mt-3">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label asp-for="StateCode" class="form-label">State</label>
+                    <input asp-for="StateCode" class="form-control" maxlength="2" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="PlanningYear" class="form-label">Planning Year</label>
+                    <input asp-for="PlanningYear" type="number" min="2000" max="2099" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="FrameSize" class="form-label">Frame Size</label>
+                    <input asp-for="FrameSize" type="number" min="1" class="form-control" />
+                    <div class="form-text">Valid outlets in <code>map_location</code>.</div>
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="DesignEffect" class="form-label">Design Effect</label>
+                    <input asp-for="DesignEffect" type="number" step="0.01" min="0.5" max="5" class="form-control" />
+                </div>
+
+                <div class="col-md-3">
+                    <label asp-for="ExpectedRvrPercent" class="form-label">Expected RVR (%)</label>
+                    <input asp-for="ExpectedRvrPercent" type="number" step="0.01" min="0" max="100" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="AccuracyRatePercent" class="form-label">Accuracy Rate (%)</label>
+                    <input asp-for="AccuracyRatePercent" type="number" step="0.01" min="50" max="100" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="CompletionRatePercent" class="form-label">Completion Rate (%)</label>
+                    <input asp-for="CompletionRatePercent" type="number" step="0.01" min="50" max="100" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="SafetyMarginPercent" class="form-label">Safety Margin (%)</label>
+                    <input asp-for="SafetyMarginPercent" type="number" step="0.01" min="0" max="50" class="form-control" />
+                </div>
+
+                <div class="col-md-6">
+                    <div class="form-check mt-4">
+                        <input asp-for="UseOneSidedCi" class="form-check-input" />
+                        <label asp-for="UseOneSidedCi" class="form-check-label">
+                            Use one-sided 95% CI (z = 1.645, SAMHSA standard)
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    Compute &amp; Download Sample
+                </button>
+            </div>
+        </form>
+
+        <hr class="my-5" />
+        <small class="text-muted">
+            The workbook returned has two sheets: <em>Calculation</em>
+            (inputs and the Effective &rarr; Target &rarr; Original sample size chain)
+            and <em>Sample</em> (the randomly drawn outlets, one per row, with id,
+            name, address, and coordinates). Re-submitting the form re-draws &mdash;
+            samples are not persisted in this version.
+        </small>
+    </div>
+</div>

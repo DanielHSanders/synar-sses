@@ -22,6 +22,31 @@ public sealed class MicrodataRepository
     // microdata shape. `samplingFrameSize` is the count of outlets in the
     // sampling frame for the year (the population N). For KY-2025 this is
     // 4452, matching `Synar2025_SSES_Final.xlsx` Table 2.
+    // Compute the headline rates from a prior year of synarcheck data, used
+    // as planning defaults on the sample-size page. KY's data has no N* rows
+    // (synarcheck only tracks inspections that actually happened plus
+    // ineligibles), so completion rate is effectively 1.0 in practice.
+    public async Task<PriorYearStats?> GetPriorYearStatsAsync(int checkYear)
+    {
+        const string sql = """
+            SELECT
+                count(*)                                     AS total,
+                count(*) FILTER (WHERE status IN ('Sale','NS'))    AS eligible_complete,
+                count(*) FILTER (WHERE status = 'Sale')            AS violation_count
+            FROM synarcheck WHERE checkyear = @Year
+            """;
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var row = await conn.QuerySingleAsync<(int Total, int EligibleComplete, int ViolationCount)>(
+            sql, new { Year = (short)checkYear });
+        if (row.Total == 0) return null;
+        var accuracy   = 100.0 * row.EligibleComplete / row.Total;
+        var completion = 100.0;  // synarcheck has no refusals
+        var rvr        = row.EligibleComplete > 0
+            ? 100.0 * row.ViolationCount / row.EligibleComplete : 0;
+        return new PriorYearStats(checkYear, row.Total, row.EligibleComplete,
+                                  row.ViolationCount, rvr, accuracy, completion);
+    }
+
     public async Task<IReadOnlyList<MicrodataRow>> GetMicrodataAsync(
         int checkYear, int samplingFrameSize)
     {
