@@ -33,10 +33,24 @@ public sealed class MicrodataRepository
                 '1'                                                AS variance_stratum,
                 @FrameSize                                         AS variance_stratum_population,
                 CASE
-                    WHEN sc.status = 'Sale'                  THEN 'EC'
-                    WHEN sc.status = 'NS'                    THEN 'EC'
-                    WHEN sc.ineligible::int = 1              THEN 'N8'
-                    ELSE                                          'EC'
+                    WHEN sc.status = 'Sale' OR sc.status = 'NS' THEN 'EC'
+                    WHEN sc.ineligible::int = 1 THEN
+                        CASE
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%OUT OF BUSINESS%'      THEN 'I1'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%DOES NOT SELL TOBACCO%' THEN 'I2'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%CLOSED FOR A PERIOD%'   THEN 'I5'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%TEMPORARY CLOSURE%'     THEN 'I5'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%INACCESSIBLE%'          THEN 'I3'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%PRIVATE CLUB%'          THEN 'I4'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%PRIVATE RESIDENCE%'     THEN 'I4'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%CANT BE LOCATED%'       THEN 'I6'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%CAN''T BE LOCATED%'     THEN 'I6'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%WHOLESALE%'             THEN 'I7'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%VENDING MACHINE%'       THEN 'I8'
+                            WHEN UPPER(sc.ineligiblereason) LIKE '%DUPLICATE%'             THEN 'I9'
+                            ELSE 'I10'
+                        END
+                    ELSE 'EC'
                 END                                                AS disposition_code,
                 CASE WHEN sc.soldtobacco::int = 1 THEN true
                      WHEN sc.soldtobacco::int = 0 THEN false
