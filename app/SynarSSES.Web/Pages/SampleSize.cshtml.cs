@@ -40,19 +40,27 @@ public class SampleSizeModel : PageModel
     [BindProperty] public double CompletionRatePercent { get; set; } = 100.0;
     [BindProperty] public double SafetyMarginPercent { get; set; } = 0.0;
     [BindProperty] public bool UseOneSidedCi { get; set; } = true;
+    // When on, the frame is restricted to outlets that also hold an ABC
+    // license for the planning year -- the most reliable sales-of-cigarettes
+    // signal. Defaults on because 2026 onward this is the primary list.
+    [BindProperty] public bool RequireAbcLicense { get; set; } = true;
     [BindProperty] public double CigarettePercent  { get; set; } = 37.5;
     [BindProperty] public double SmokelessPercent  { get; set; } = 32.5;
     [BindProperty] public double ElectronicPercent { get; set; } = 20.0;
     [BindProperty] public double MentholPercent    { get; set; } = 10.0;
 
     public PriorYearStats? PriorYear { get; set; }
+    public int ValidOutletCount { get; set; }
+    public int ValidWithAbcCount { get; set; }
 
     public async Task OnGetAsync()
     {
         // Pre-fill from the prior year's actuals if any data exists.
         var priorYear = DateTime.UtcNow.Year - 1;
         PriorYear = await _microdataRepo.GetPriorYearStatsAsync(priorYear);
-        FrameSize = await _mapRepo.CountValidAsync();
+        ValidOutletCount  = await _mapRepo.CountValidAsync();
+        ValidWithAbcCount = await _mapRepo.CountValidAsync(PlanningYear);
+        FrameSize = RequireAbcLicense ? ValidWithAbcCount : ValidOutletCount;
         if (PriorYear is not null)
         {
             ExpectedRvrPercent    = Math.Round(PriorYear.ViolationRatePercent, 2);
@@ -72,9 +80,13 @@ public class SampleSizeModel : PageModel
             CompletionRatePercent = CompletionRatePercent,
             SafetyMarginPercent = SafetyMarginPercent,
             UseOneSidedCi = UseOneSidedCi,
+            FrameFilterDescription = RequireAbcLicense
+                ? $"Valid outlets with {PlanningYear} ABC license"
+                : "Valid outlets",
         };
         var result = _calculator.Compute(input);
-        var frame = await _mapRepo.GetValidOutletsAsync();
+        var frame = await _mapRepo.GetValidOutletsAsync(
+            RequireAbcLicense ? PlanningYear : (int?)null);
         var drawn = _drawer.Draw(frame, Math.Min(result.OriginalSampleSize, frame.Count));
         var assignment = _assigner.Assign(drawn,
             CigarettePercent, SmokelessPercent, ElectronicPercent, MentholPercent);

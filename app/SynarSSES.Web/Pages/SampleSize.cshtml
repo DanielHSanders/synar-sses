@@ -40,7 +40,10 @@
                 <div class="col-md-3">
                     <label asp-for="FrameSize" class="form-label">Frame Size</label>
                     <input asp-for="FrameSize" type="number" min="1" class="form-control" />
-                    <div class="form-text">Valid outlets in <code>map_location</code>.</div>
+                    <div class="form-text">
+                        Valid: @Model.ValidOutletCount &middot;
+                        Valid + ABC @Model.PlanningYear: @Model.ValidWithAbcCount
+                    </div>
                 </div>
                 <div class="col-md-3">
                     <label asp-for="DesignEffect" class="form-label">Design Effect</label>
@@ -69,6 +72,13 @@
                         <input asp-for="UseOneSidedCi" class="form-check-input" />
                         <label asp-for="UseOneSidedCi" class="form-check-label">
                             Use one-sided 95% CI (z = 1.645, SAMHSA standard)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input asp-for="RequireAbcLicense" class="form-check-input" />
+                        <label asp-for="RequireAbcLicense" class="form-check-label">
+                            Limit frame to outlets with a current-year ABC license
+                            <span class="text-muted">(most reliable cigarette-sales signal)</span>
                         </label>
                     </div>
                 </div>

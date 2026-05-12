@@ -37,6 +37,7 @@ public sealed class SampleSizeWorkbookWriter
         ws.Cell("A13").Value = "Safety Margin (%)";          ws.Cell("B13").Value = r.Input.SafetyMarginPercent;
         ws.Cell("A14").Value = "Precision Target";           ws.Cell("B14").Value = r.Input.PrecisionTarget;
         ws.Cell("A15").Value = "CI Type";                    ws.Cell("B15").Value = r.Input.UseOneSidedCi ? "One-sided 95% (z=1.645)" : "Two-sided 95% (z=1.96)";
+        ws.Cell("A16").Value = "Frame filter";               ws.Cell("B16").Value = r.Input.FrameFilterDescription ?? "Valid outlets";
 
         ws.Cell("A17").Value = "Results";
         ws.Cell("A18").Value = "Effective Sample Size";      ws.Cell("B18").Value = r.EffectiveSampleSize;

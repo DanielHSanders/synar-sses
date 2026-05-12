@@ -15,4 +15,7 @@ public sealed class SampleSizeInput
     public required bool UseOneSidedCi { get; init; }        // true: 1.645, false: 1.96
     // Precision target in absolute units: e.g. 0.03 means 3%. SAMHSA default 0.03.
     public double PrecisionTarget { get; init; } = 0.03;
+    // Free-text label for the row on the Calculation sheet describing which
+    // outlets are in the frame (e.g. "Valid + ABC 2026 license").
+    public string? FrameFilterDescription { get; init; }
 }
