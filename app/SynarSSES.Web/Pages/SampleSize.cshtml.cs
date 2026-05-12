@@ -42,8 +42,8 @@ public class SampleSizeModel : PageModel
     [BindProperty] public bool UseOneSidedCi { get; set; } = true;
     // When on, the frame is restricted to outlets that also hold an ABC
     // license for the planning year -- the most reliable sales-of-cigarettes
-    // signal. Defaults on because 2026 onward this is the primary list.
-    [BindProperty] public bool RequireAbcLicense { get; set; } = true;
+    // signal. Default off so the user opts into the narrower frame.
+    [BindProperty] public bool RequireAbcLicense { get; set; } = false;
     [BindProperty] public double CigarettePercent  { get; set; } = 37.5;
     [BindProperty] public double SmokelessPercent  { get; set; } = 32.5;
     [BindProperty] public double ElectronicPercent { get; set; } = 20.0;

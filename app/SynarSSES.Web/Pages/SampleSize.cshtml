@@ -39,7 +39,9 @@
                 </div>
                 <div class="col-md-3">
                     <label asp-for="FrameSize" class="form-label">Frame Size</label>
-                    <input asp-for="FrameSize" type="number" min="1" class="form-control" />
+                    <input asp-for="FrameSize" type="number" min="1" class="form-control"
+                           data-valid-count="@Model.ValidOutletCount"
+                           data-valid-abc-count="@Model.ValidWithAbcCount" />
                     <div class="form-text">
                         Valid: @Model.ValidOutletCount &middot;
                         Valid + ABC @Model.PlanningYear: @Model.ValidWithAbcCount
@@ -129,3 +131,18 @@
         </small>
     </div>
 </div>
+
+@section Scripts {
+    <script>
+      (function () {
+        var cb = document.getElementById('RequireAbcLicense');
+        var fs = document.getElementById('FrameSize');
+        if (!cb || !fs) return;
+        cb.addEventListener('change', function () {
+          fs.value = cb.checked
+            ? fs.dataset.validAbcCount
+            : fs.dataset.validCount;
+        });
+      })();
+    </script>
+}
