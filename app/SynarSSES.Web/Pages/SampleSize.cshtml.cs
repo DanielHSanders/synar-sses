@@ -63,9 +63,14 @@ public class SampleSizeModel : PageModel
         FrameSize = RequireAbcLicense ? ValidWithAbcCount : ValidOutletCount;
         if (PriorYear is not null)
         {
-            ExpectedRvrPercent    = Math.Round(PriorYear.ViolationRatePercent, 2);
-            AccuracyRatePercent   = Math.Round(PriorYear.AccuracyRatePercent, 2);
-            CompletionRatePercent = Math.Round(PriorYear.CompletionRatePercent, 2);
+            ExpectedRvrPercent  = Math.Round(PriorYear.ViolationRatePercent, 2);
+            AccuracyRatePercent = Math.Round(PriorYear.AccuracyRatePercent, 2);
+            // synarcheck only stores inspections that actually occurred plus
+            // ineligibles, so the raw completion rate is always 100%. The
+            // legacy SSES program plans with completion = accuracy (KY's
+            // approved Appendix B convention), which produces matching
+            // Original Sample Size. Default to accuracy here; user can override.
+            CompletionRatePercent = AccuracyRatePercent;
         }
     }
 
