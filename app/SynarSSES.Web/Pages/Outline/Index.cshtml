@@ -1,0 +1,85 @@
+@page
+@model SynarSSES.Web.Pages.Outline.IndexModel
+@{
+    ViewData["Title"] = "Outline";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="display-5 mb-0">Synar Outline</h1>
+    <a class="btn btn-outline-primary" asp-page="EditSection" asp-route-id="0">+ Add Section</a>
+</div>
+<p class="text-muted">
+    Each section is a step in the annual Synar process. Year-tagged entries
+    record when specific tasks were completed. Anyone can edit, add, or delete.
+</p>
+
+@foreach (var sect in Model.Sections)
+{
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <h3 class="mb-0 d-inline">@sect.Title</h3>
+                @if (!string.IsNullOrEmpty(sect.DateRange))
+                {
+                    <span class="badge bg-light text-dark ms-2">@sect.DateRange</span>
+                }
+            </div>
+            <div class="btn-group btn-group-sm">
+                <a class="btn btn-outline-secondary" asp-page="EditSection" asp-route-id="@sect.SectionId">Edit Section</a>
+                <a class="btn btn-outline-secondary" asp-page="EditEntry" asp-route-id="0" asp-route-sectionId="@sect.SectionId">+ Add Entry</a>
+                <form method="post" asp-page-handler="DeleteSection" asp-route-sectionId="@sect.SectionId"
+                      class="d-inline" onsubmit="return confirm('Delete this entire section and all its entries?');">
+                    <button type="submit" class="btn btn-outline-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+        <div class="card-body">
+            @if (!string.IsNullOrWhiteSpace(sect.BodyMd))
+            {
+                <div class="outline-md">@Html.Raw(Model.Md.ToHtml(sect.BodyMd))</div>
+            }
+
+            @if (sect.Entries.Any())
+            {
+                <h5 class="mt-3 mb-2 text-muted">Completion records</h5>
+                <ul class="list-group list-group-flush">
+                    @foreach (var entry in sect.Entries.OrderByDescending(e => e.Year).ThenByDescending(e => e.CompletedOn))
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>
+                                    @if (entry.Year.HasValue) { <span class="badge bg-secondary me-2">@entry.Year</span> }
+                                    @entry.Label
+                                </strong>
+                                @if (entry.CompletedOn.HasValue)
+                                {
+                                    <span class="text-muted ms-2">@entry.CompletedOn.Value.ToString("yyyy-MM-dd")</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(entry.NotesMd))
+                                {
+                                    <div class="outline-md small mt-1">@Html.Raw(Model.Md.ToHtml(entry.NotesMd))</div>
+                                }
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                                <a class="btn btn-outline-secondary" asp-page="EditEntry" asp-route-id="@entry.EntryId" asp-route-sectionId="@sect.SectionId">Edit</a>
+                                <form method="post" asp-page-handler="DeleteEntry" asp-route-entryId="@entry.EntryId"
+                                      class="d-inline" onsubmit="return confirm('Delete this entry?');">
+                                    <button type="submit" class="btn btn-outline-danger">Delete</button>
+                                </form>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+}
+
+@section Styles {
+    <style>
+        .outline-md h3 { font-size: 1.15rem; margin-top: 1rem; }
+        .outline-md h4 { font-size: 1.0rem;  margin-top: 0.75rem; }
+        .outline-md ul, .outline-md ol { margin-bottom: 0.5rem; }
+        .outline-md p:last-child { margin-bottom: 0; }
+    </style>
+}

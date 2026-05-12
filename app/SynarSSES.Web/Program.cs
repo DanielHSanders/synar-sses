@@ -27,6 +27,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 
 builder.Services.AddScoped<MicrodataRepository>(_ => new MicrodataRepository(connectionString));
 builder.Services.AddScoped<MapLocationRepository>(_ => new MapLocationRepository(connectionString));
+builder.Services.AddScoped<OutlineRepository>(_ => new OutlineRepository(connectionString));
+builder.Services.AddSingleton<MarkdownRenderer>();
 builder.Services.AddSingleton<SssCalculator>();
 builder.Services.AddSingleton<SssWorkbookWriter>();
 builder.Services.AddSingleton<SampleSizeCalculator>();
