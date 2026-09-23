@@ -16,6 +16,17 @@
             SAMHSA layout (Tables 1&ndash;8).
         </p>
 
+        @if (Model.Sample is null)
+        {
+            <div class="alert alert-warning">
+                <strong>No recorded sample for @Model.CheckYear.</strong>
+                The frame size is the population the sample was drawn from, and it
+                cannot be recovered by counting outlets now &mdash; the frame keeps
+                changing after the draw. Enter it from that year's sample-size run
+                before generating, or the weights and standard error will be wrong.
+            </div>
+        }
+
         <form method="post" class="mt-4">
             <div class="row g-3">
                 <div class="col-md-3">
@@ -33,6 +44,12 @@
                 <div class="col-md-3">
                     <label asp-for="FrameSize" class="form-label">Frame Size</label>
                     <input asp-for="FrameSize" type="number" min="1" class="form-control" />
+                    @if (Model.Sample is not null)
+                    {
+                        <div class="form-text">
+                            From the @Model.Sample.DrawnAt.ToString("yyyy-MM-dd") draw@(Model.Sample.IsFinal ? " (final)" : "").
+                        </div>
+                    }
                 </div>
             </div>
             <div class="mt-4">
@@ -52,3 +69,19 @@
         </small>
     </div>
 </div>
+
+@section Scripts {
+    <script>
+      // A survey run in year N is submitted in FFY N+1. Keep the two in step
+      // so a report can never go out labelled with the wrong fiscal year.
+      (function () {
+        var cy = document.getElementById('CheckYear');
+        var ffy = document.getElementById('FederalFiscalYear');
+        if (!cy || !ffy) return;
+        cy.addEventListener('change', function () {
+          var y = parseInt(cy.value, 10);
+          if (!isNaN(y)) ffy.value = y + 1;
+        });
+      })();
+    </script>
+}

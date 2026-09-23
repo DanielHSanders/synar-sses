@@ -115,6 +115,25 @@
                 </div>
             </div>
 
+            <hr class="mt-4 mb-3" />
+            <div class="form-check">
+                <input asp-for="RecordSample" class="form-check-input" />
+                <label asp-for="RecordSample" class="form-check-label">
+                    <strong>Record this sample</strong>
+                    <span class="text-muted">
+                        &mdash; saves the frame size, the calculator inputs and the
+                        drawn outlets. Tick this for the draw that goes to the field:
+                        the frame cannot be recovered afterwards by counting outlets,
+                        and the SSES report needs it.
+                    </span>
+                </label>
+            </div>
+            <div class="mt-2">
+                <label asp-for="SampleNote" class="form-label">Note (optional)</label>
+                <input asp-for="SampleNote" class="form-control" maxlength="300"
+                       placeholder="e.g. final 2027 draw, sent to ABC" />
+            </div>
+
             <div class="mt-4">
                 <button type="submit" class="btn btn-primary btn-lg">
                     Compute &amp; Download Sample

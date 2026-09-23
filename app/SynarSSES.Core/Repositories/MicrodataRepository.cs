@@ -18,10 +18,14 @@ public sealed class MicrodataRepository
         _connectionString = connectionString;
     }
 
-    // Pull all inspections for a given check year, mapped to the Table 5
-    // microdata shape. `samplingFrameSize` is the count of outlets in the
-    // sampling frame for the year (the population N). For KY-2025 this is
-    // 4452, matching `Synar2025_SSES_Final.xlsx` Table 2.
+    // Most recent year that has inspection data loaded. Used to default the
+    // report page rather than hardcoding a year that goes stale.
+    public async Task<int?> GetLatestCheckYearAsync()
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        return await conn.ExecuteScalarAsync<int?>("SELECT max(checkyear) FROM synarcheck");
+    }
+
     // The largest synarcheckid currently in the table. New rows must be
     // assigned ids starting from this + 1 because the column is NOT NULL and
     // has no GENERATED clause.
@@ -57,6 +61,10 @@ public sealed class MicrodataRepository
                                   row.ViolationCount, rvr, accuracy, completion);
     }
 
+    // Pull all inspections for a given check year, mapped to the Table 5
+    // microdata shape. `samplingFrameSize` is the population N the sample was
+    // drawn from; it comes from synar_sample, not from a live count, because
+    // map_location keeps changing after the draw.
     public async Task<IReadOnlyList<MicrodataRow>> GetMicrodataAsync(
         int checkYear, int samplingFrameSize)
     {

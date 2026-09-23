@@ -14,6 +14,7 @@ public class SampleSizeModel : PageModel
     private readonly SampleDrawer _drawer;
     private readonly CheckTypeAssigner _assigner;
     private readonly SampleSizeWorkbookWriter _writer;
+    private readonly SampleRepository _samples;
 
     public SampleSizeModel(
         MicrodataRepository microdataRepo,
@@ -21,7 +22,8 @@ public class SampleSizeModel : PageModel
         SampleSizeCalculator calculator,
         SampleDrawer drawer,
         CheckTypeAssigner assigner,
-        SampleSizeWorkbookWriter writer)
+        SampleSizeWorkbookWriter writer,
+        SampleRepository samples)
     {
         _microdataRepo = microdataRepo;
         _mapRepo = mapRepo;
@@ -29,6 +31,7 @@ public class SampleSizeModel : PageModel
         _drawer = drawer;
         _assigner = assigner;
         _writer = writer;
+        _samples = samples;
     }
 
     [BindProperty] public string StateCode { get; set; } = "KY";
@@ -44,6 +47,10 @@ public class SampleSizeModel : PageModel
     // license for the planning year -- the most reliable sales-of-cigarettes
     // signal. Default off so the user opts into the narrower frame.
     [BindProperty] public bool RequireAbcLicense { get; set; } = false;
+    // Off by default: planning runs are usually exploratory, and recording
+    // every one of them would bury the draw that actually went to the field.
+    [BindProperty] public bool RecordSample { get; set; } = false;
+    [BindProperty] public string? SampleNote { get; set; }
     [BindProperty] public double CigarettePercent  { get; set; } = 37.5;
     [BindProperty] public double SmokelessPercent  { get; set; } = 32.5;
     [BindProperty] public double ElectronicPercent { get; set; } = 20.0;
@@ -99,6 +106,15 @@ public class SampleSizeModel : PageModel
         // synarcheckid is NOT NULL with no auto-generation; assign the next
         // block sequentially from max+1 so the xlsx can be loaded directly.
         var firstId = await _microdataRepo.GetMaxSynarcheckIdAsync() + 1;
+
+        if (RecordSample)
+        {
+            // Persist the frame this draw was made against. It cannot be
+            // recovered later by counting map_location, and the SSES report
+            // needs it as the population N.
+            await _samples.RecordAsync(
+                PlanningYear, StateCode, input, result, drawn, SampleNote);
+        }
 
         var bytes = _writer.Write(result, drawn, assignment, PlanningYear, StateCode, firstId);
         var fileName = $"SynarSample{PlanningYear}_{DateTime.UtcNow:yyyyMMddHHmmss}.xlsx";
