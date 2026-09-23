@@ -42,6 +42,42 @@ public sealed class Ky2025ValidationTests
         Assert.Equal(0.015447390432283435, report.Overall.StandardError, precision: 10);
     }
 
+    // Table 6 groups product types into SAMHSA's fixed categories, which do not
+    // line up one-for-one with the checktype values KY records when it assigns
+    // inspections. Menthol has no SAMHSA row and reports under Cigarettes;
+    // Electronic reports as ENDS. Getting this wrong silently dumps buys into
+    // a "Missing" row, which is what happened before this test existed.
+    [Fact]
+    public void ReproducesKy2025ProductCrossTab()
+    {
+        var goldenPath = LocateGoldenFile()
+            ?? throw new FileNotFoundException("Synar2025_SSES_Final.xlsx not found.");
+
+        var report = new SssCalculator().Compute(new SssInput
+        {
+            StateCode = "KY",
+            FederalFiscalYear = 2026,
+            Microdata = LoadTable5(goldenPath),
+        }, withFpc: true);
+
+        var bytes = new SssWorkbookWriter().Write(report);
+        using var produced = new XLWorkbook(new MemoryStream(bytes));
+        using var golden = new XLWorkbook(goldenPath);
+
+        // Rows 9-16 of Table 6: category, attempted buys, successful buys.
+        for (var row = 9; row <= 16; row++)
+        {
+            var label = golden.Worksheet("Table6").Cell(row, 1).GetString();
+            Assert.Equal(label, produced.Worksheet("Table6").Cell(row, 1).GetString());
+            for (var col = 2; col <= 3; col++)
+            {
+                Assert.Equal(
+                    (int)golden.Worksheet("Table6").Cell(row, col).GetDouble(),
+                    (int)produced.Worksheet("Table6").Cell(row, col).GetDouble());
+            }
+        }
+    }
+
     private static string? LocateGoldenFile()
     {
         var env = Environment.GetEnvironmentVariable("SSES_GOLDEN_XLSX");

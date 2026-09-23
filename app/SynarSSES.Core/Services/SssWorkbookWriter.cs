@@ -276,16 +276,42 @@ public sealed class SssWorkbookWriter
     // inspector age x gender. For v1 we emit the left side only -- the right
     // side is an audit aid, not part of the headline submission, and the
     // 2025 golden has all-zero pivots for KY (no asked-for-id captured).
+    // SAMHSA prints every category on Tables 6-8 whether or not the state has
+    // data for it, always in this order, with a Grand Total last. Categories
+    // are emitted from these lists rather than from whatever the data happens
+    // to contain, so a state with no ENDS checks still shows an ENDS row of
+    // zeros and the row positions stay stable year to year.
+    private static readonly string[] ProductCategories =
+    {
+        "Cigarettes", "Small cigars/Cigarillos", "Smokeless tobacco", "ENDS",
+        "Other", "Missing", "Invalid",
+    };
+
+    private static readonly string[] RetailOutletCategories =
+    {
+        "Gas Station", "Tobacco Store", "Restaurant", "Hotel", "Grocery Store",
+        "Drug Store", "Other", "Missing", "Invalid",
+    };
+
+    private static readonly string[] AskedForIdCategories =
+    {
+        "Yes", "No", "Missing", "Invalid",
+    };
+
     private static void WriteTable6(IXLWorksheet ws, SssReport report)
-        => WriteCrossTabFrequency(ws, "SSES Table 6 (Synar Survey Inspection Results by Product Type)", "Product Type", report.ProductCrossTab, report);
+        => WriteCrossTabFrequency(ws, "SSES Table 6 (Synar Survey Inspection Results by Product Type)",
+                                  "Product Type", ProductCategories, report.ProductCrossTab, report);
 
     private static void WriteTable7(IXLWorksheet ws, SssReport report)
-        => WriteCrossTabFrequency(ws, "SSES Table 7 (Synar Survey Inspection Results by Retail Outlet Type)", "Retail Outlet", report.OutletCrossTab, report);
+        => WriteCrossTabFrequency(ws, "SSES Table 7 (Synar Survey Inspection Results by Retail Outlet Type)",
+                                  "Retail Outlet", RetailOutletCategories, report.OutletCrossTab, report);
 
     private static void WriteTable8(IXLWorksheet ws, SssReport report)
-        => WriteCrossTabFrequency(ws, "SSES Table 8 (Synar Survey Inspection Results by Clerk Asked for ID)", "Clerk Asked for ID", report.AskedForIdCrossTab, report);
+        => WriteCrossTabFrequency(ws, "SSES Table 8 (Synar Survey Inspection Results by Clerk Asked for ID)",
+                                  "Clerk Asked for ID", AskedForIdCategories, report.AskedForIdCrossTab, report);
 
-    private static void WriteCrossTabFrequency(IXLWorksheet ws, string title, string categoryLabel, CrossTab tab, SssReport report)
+    private static void WriteCrossTabFrequency(IXLWorksheet ws, string title, string categoryLabel,
+                                               string[] categories, CrossTab tab, SssReport report)
     {
         ws.Cell("A1").Value = title;
         ws.Cell("D3").Value = $"STATE: {report.StateCode}";
@@ -296,18 +322,37 @@ public sealed class SssWorkbookWriter
         ws.Cell("C8").Value = "Successful Buys";
         ws.Cell("D8").Value = "Violation Rate (%)";
 
+        var byCategory = tab.Rows.ToDictionary(r => r.Category, r => r);
         var row = 9;
         int totalAttempts = 0, totalSuccesses = 0;
-        foreach (var r in tab.Rows)
+        foreach (var category in categories)
         {
-            ws.Cell(row, 1).Value = r.Category;
-            ws.Cell(row, 2).Value = r.AttemptedBuys;
-            ws.Cell(row, 3).Value = r.SuccessfulBuys;
-            ws.Cell(row, 4).Value = r.ViolationRate;
-            totalAttempts  += r.AttemptedBuys;
-            totalSuccesses += r.SuccessfulBuys;
+            byCategory.TryGetValue(category, out var r);
+            var attempts = r?.AttemptedBuys ?? 0;
+            var successes = r?.SuccessfulBuys ?? 0;
+            ws.Cell(row, 1).Value = category;
+            ws.Cell(row, 2).Value = attempts;
+            ws.Cell(row, 3).Value = successes;
+            ws.Cell(row, 4).Value = attempts > 0 ? (double)successes / attempts : 0;
+            totalAttempts  += attempts;
+            totalSuccesses += successes;
             row++;
         }
+
+        // Any category the calculator produced that is not on SAMHSA's list
+        // would silently vanish from the workbook, so surface it rather than
+        // dropping buys out of the Grand Total.
+        foreach (var leftover in tab.Rows.Where(r => !categories.Contains(r.Category)))
+        {
+            ws.Cell(row, 1).Value = leftover.Category + " (unmapped)";
+            ws.Cell(row, 2).Value = leftover.AttemptedBuys;
+            ws.Cell(row, 3).Value = leftover.SuccessfulBuys;
+            ws.Cell(row, 4).Value = leftover.ViolationRate;
+            totalAttempts  += leftover.AttemptedBuys;
+            totalSuccesses += leftover.SuccessfulBuys;
+            row++;
+        }
+
         ws.Cell(row, 1).Value = "Grand Total";
         ws.Cell(row, 2).Value = totalAttempts;
         ws.Cell(row, 3).Value = totalSuccesses;

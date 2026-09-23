@@ -479,12 +479,15 @@ public sealed class SssCalculator
         return dict;
     }
 
+    // Category labels below are SAMHSA's, exactly as they appear on the
+    // printed Tables 6-8. SssWorkbookWriter emits the full fixed list in a
+    // fixed order, so these strings have to match it character for character.
     private static string MapProductType(int? code) => code switch
     {
-        1 => "Cigarette",
-        2 => "Cigar",
-        3 => "Smokeless",
-        4 => "E-cig",
+        1 => "Cigarettes",
+        2 => "Small cigars/Cigarillos",
+        3 => "Smokeless tobacco",
+        4 => "ENDS",
         5 => "Other",
         null => "Missing",
         _ => "Invalid",
@@ -492,8 +495,15 @@ public sealed class SssCalculator
 
     private static string MapRetailOutlet(int? code) => code switch
     {
+        1 => "Gas Station",
+        2 => "Tobacco Store",
+        3 => "Restaurant",
+        4 => "Hotel",
+        5 => "Grocery Store",
+        6 => "Drug Store",
+        7 => "Other",
         null => "Missing",
-        _    => $"Type {code}",
+        _ => "Invalid",
     };
 
     private static string MapAskedForId(string? value)

@@ -96,9 +96,16 @@ public sealed class MicrodataRepository
                 sc.iaage                                           AS inspector_age,
                 NULL::int                                          AS vm_frame_size,
                 CASE
-                    WHEN sc.checktype = 'Cigarette' THEN 1
-                    WHEN sc.checktype = 'Smokeless' THEN 3
-                    WHEN sc.checktype = 'E-cig'     THEN 4
+                    -- Menthol is a cigarette variant: KY tracks it separately
+                    -- when assigning checks, but SAMHSA's Table 6 has no
+                    -- menthol row, so it reports under Cigarettes. Confirmed
+                    -- against the 2025 submission (Cigarette 130 + Menthol 34
+                    -- = the 164 attempted buys shown on that Table 6).
+                    WHEN sc.checktype = 'Cigarette'  THEN 1
+                    WHEN sc.checktype = 'Menthol'    THEN 1
+                    WHEN sc.checktype = 'Smokeless'  THEN 3
+                    WHEN sc.checktype = 'Electronic' THEN 4
+                    WHEN sc.checktype = 'E-cig'      THEN 4
                     ELSE NULL END                                  AS product_type,
                 NULL::int                                          AS retail_outlet_type,
                 NULL                                               AS asked_for_id
