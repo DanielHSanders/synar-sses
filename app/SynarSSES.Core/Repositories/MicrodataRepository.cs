@@ -98,7 +98,10 @@ public sealed class MicrodataRepository
                 CASE WHEN sc.soldtobacco::int = 1 THEN true
                      WHEN sc.soldtobacco::int = 0 THEN false
                      ELSE NULL END                                 AS violation,
-                NULL                                               AS outlet_type,
+                -- KY samples no vending machines. SSES rejects a blank outlet
+                -- type outright, and the OTC/VM blocks of Table 2 are computed
+                -- from this column, so it must be set.
+                'OTC'                                              AS outlet_type,
                 sc.ia                                              AS inspector_id,
                 si.gender                                          AS inspector_gender,
                 sc.iaage                                           AS inspector_age,

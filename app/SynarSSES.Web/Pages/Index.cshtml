@@ -52,6 +52,23 @@
                     }
                 </div>
             </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-3">
+                    <label asp-for="EffectiveSampleSize" class="form-label">Effective Sample Size</label>
+                    <input asp-for="EffectiveSampleSize" type="number" min="1" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="TargetSampleSize" class="form-label">Target Sample Size</label>
+                    <input asp-for="TargetSampleSize" type="number" min="1" class="form-control" />
+                </div>
+                <div class="col-md-6 d-flex align-items-end">
+                    <div class="form-text">
+                        From that year&rsquo;s sample-size calculation. SSES asks for these
+                        when it runs and prints them on Table 1; they are filled in from the
+                        recorded draw when there is one.
+                    </div>
+                </div>
+            </div>
             <div class="mt-4">
                 <button type="submit" class="btn btn-primary btn-lg">
                     Generate &amp; Download SSES Workbook

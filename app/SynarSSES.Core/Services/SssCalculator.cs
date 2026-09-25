@@ -13,13 +13,15 @@ namespace SynarSSES.Core.Services;
 //   CSPSSES.ComputeStatistics_Step6     - CI, design effects, accuracy/completion rates
 //
 // The math is Taylor linearization with domain estimation per the SSES manual
-// section "SSES Variance Estimation Approach". The validation target is to
-// reproduce Synar2025_SSES_Final.xlsx from the 2025 KY microdata.
+// section "SSES Variance Estimation Approach". Over-the-counter outlets and
+// vending machines are each treated as a domain of the full sample, which is
+// how SSES gets a separate standard error for each on Table 2.
+//
+// SSES distinguishes sampling strata (Table 2 rows) from variance strata (the
+// variance computation). This port groups on the variance stratum for both,
+// which is exact whenever the two coincide -- true of every KY submission.
 public sealed class SssCalculator
 {
-    // Per-row scratch state. Mirrors the helper columns the VBA writes into
-    // the output worksheet (col_RCode, col_D, col_Resp, col_OTCIND, COL_VMIND,
-    // col_YI, col_AdFct, col_AWT, col_ZHI).
     private sealed class Row
     {
         public required MicrodataRow Source { get; init; }
@@ -32,6 +34,8 @@ public sealed class SssCalculator
         public double AdjFct;
         public double Awt;
         public double Zhi;
+        public double ZhiOtc;
+        public double ZhiVm;
     }
 
     private sealed class Stratum
@@ -43,8 +47,12 @@ public sealed class SssCalculator
         public double Wt;
         public int Mh;
         public double Mzh;
+        public double MzhOtc;
+        public double MzhVm;
         public double Fpc;
         public double Sh2;
+        public double Sh2Otc;
+        public double Sh2Vm;
     }
 
     public SssReport Compute(SssInput input)
@@ -60,15 +68,12 @@ public sealed class SssCalculator
         var overall = Step3_OverallRates(strata);
         Step4_TaylorResiduals(strata, overall);
         Step5_StandardError(strata, overall, withFpc);
-        Step6_Summaries(rows, strata, overall);
 
-        return BuildReport(input, strata, rows, overall);
+        return BuildReport(input, strata, rows, overall, withFpc);
     }
 
     // VBA: CSPStrata.ComputeStatistics_Step1. Walks each row to classify it
-    // (d, Resp, OTC/VM, yI flags) and groups rows into variance strata. KY
-    // 2025 has a single stratum but the algorithm is written for the general
-    // multi-stratum case.
+    // (d, Resp, OTC/VM, yI flags) and groups rows into variance strata.
     private static (List<Stratum> Strata, List<Row> Rows) ClassifyAndGroup(SssInput input)
     {
         var rows = new List<Row>(input.Microdata.Count);
@@ -82,21 +87,18 @@ public sealed class SssCalculator
                 _                            => (0, 0),  // Ineligible
             };
             var outlet = (m.OutletType ?? "").Trim().ToUpperInvariant();
-            var otc = outlet == "OTC" ? 1 : 0;
-            var vm  = outlet == "VM"  ? 1 : 0;
-            var yi  = (r == DispositionCodes.Complete && m.Violation == true) ? 1 : 0;
-
             rows.Add(new Row
             {
                 Source = m,
                 RCode = r, D = d, Resp = resp,
-                Otc = otc, Vm = vm, Yi = yi,
+                Otc = outlet == "OTC" ? 1 : 0,
+                Vm = outlet == "VM" ? 1 : 0,
+                Yi = (r == DispositionCodes.Complete && m.Violation == true) ? 1 : 0,
             });
         }
 
         // Group into variance strata while preserving microdata order within
-        // each stratum (the VBA walks rows in order; sortByVStrat is a stable
-        // sort by stratum id).
+        // each stratum (the VBA sortByVStrat is a stable sort by stratum id).
         var byStratum = rows
             .GroupBy(x => x.Source.VarianceStratum)
             .Select(g => new Stratum
@@ -107,7 +109,6 @@ public sealed class SssCalculator
             })
             .ToList();
 
-        // Sanity: every row inside a stratum must agree on its population.
         foreach (var s in byStratum)
         {
             var distinct = s.Rows.Select(r => r.Source.VarianceStratumPopulation).Distinct().Count();
@@ -161,7 +162,7 @@ public sealed class SssCalculator
                     r.AdjFct = 0;
                     r.Awt = 0;
                 }
-                else // Ineligible
+                else
                 {
                     r.AdjFct = 1;
                     r.Awt = s.Wt;
@@ -170,7 +171,6 @@ public sealed class SssCalculator
         }
     }
 
-    // Working aggregates accumulated in Step3, then read by Steps 4-6.
     private sealed class Overall
     {
         public double NHat;
@@ -182,14 +182,16 @@ public sealed class SssCalculator
         public double FHat;
         public double CvW;
         public double R;
-        public double RotC;
-        public double RvM;
+        public double ROtc;
+        public double RVm;
         public int SumD;
         public int SumYi;
         public int SumResp;
-        public int M;            // sumMHI = total eligible respondents (Step 4)
-        public double Vsrs;      // simple-random-sample reference variance for design effects
-        public double Se;        // overall weighted-RVR standard error
+        public int M;            // sumMHI: EC + ineligible rows
+        public double Vsrs;      // SRS reference variance for design effects
+        public double Se;
+        public double SeOtc;
+        public double SeVm;
         public int Nn;           // sum of Vcapn across strata
     }
 
@@ -202,8 +204,8 @@ public sealed class SssCalculator
         {
             foreach (var r in s.Rows)
             {
-                o.FHat   += r.Awt;
-                o.CvW    += r.D * r.Awt * r.Awt;
+                o.FHat += r.Awt;
+                o.CvW  += r.D * r.Awt * r.Awt;
 
                 if (r.D == 1 && r.Yi == 1)
                 {
@@ -221,131 +223,120 @@ public sealed class SssCalculator
             }
         }
         if (o.NHat > 0) o.R = o.YHat / o.NHat;
-        if (o.NHatOtc > 0) o.RotC = o.YHatOtc / o.NHatOtc;
-        if (o.NHatVm > 0) o.RvM = o.YHatVm / o.NHatVm;
+        if (o.NHatOtc > 0) o.ROtc = o.YHatOtc / o.NHatOtc;
+        if (o.NHatVm > 0) o.RVm = o.YHatVm / o.NHatVm;
         if (o.NHat > 0) o.CvW = o.CvW / (o.NHat * o.NHat);
         return o;
     }
 
-    // VBA: CSPVarianceStrata.ComputeStatistics_Step4. Per row:
-    //   ZHI = d * AWT * (yI - R) / N_HAT
-    //   VSRS += d * AWT * (yI - R)^2     (accumulated across all strata)
-    // Per stratum: MZH = sum(ZHI in stratum) / MH; FPC = 1 - MH / Vcapn.
-    // Overall: VSRS = M * VSRS * cv_w / ((M - 1) * N_HAT).
+    // VBA: CSPVarianceStrata.ComputeStatistics_Step4. Per row with AWT > 0:
+    //   ZHI   = d * AWT * (yI - R)   / N_HAT
+    //   ZHI_O = d * AWT * (yI - R_o) / N_HAT_O   (OTC rows only; 0 elsewhere)
+    //   ZHI_V = d * AWT * (yI - R_v) / N_HAT_V   (VM rows only; 0 elsewhere)
+    // Each MZH divides by the whole stratum MH rather than the domain count,
+    // which is what makes this domain estimation.
     private static void Step4_TaylorResiduals(List<Stratum> strata, Overall o)
     {
         double vsrsAccum = 0;
         int sumMhi = 0;
         foreach (var s in strata)
         {
-            double sumZhi = 0;
+            double sumZhi = 0, sumZhiOtc = 0, sumZhiVm = 0;
             foreach (var r in s.Rows)
             {
-                var mhiFlag = (r.RCode == DispositionCodes.Complete
-                            || r.RCode == DispositionCodes.Ineligible) ? 1 : 0;
-                sumMhi += mhiFlag;
+                if (r.RCode == DispositionCodes.Complete || r.RCode == DispositionCodes.Ineligible)
+                    sumMhi++;
 
-                if (r.Awt > 0)
+                r.Zhi = r.ZhiOtc = r.ZhiVm = 0;
+                if (r.Awt <= 0) continue;
+
+                r.Zhi = r.D * r.Awt * (r.Yi - o.R) / o.NHat;
+                sumZhi += r.Zhi;
+                var zhiP = r.Yi - o.R;
+                vsrsAccum += r.D * r.Awt * zhiP * zhiP;
+
+                if (r.Otc == 1)
                 {
-                    r.Zhi = r.D * r.Awt * (r.Yi - o.R) / o.NHat;
-                    sumZhi += r.Zhi;
-                    var zhiP = r.Yi - o.R;
-                    vsrsAccum += r.D * r.Awt * zhiP * zhiP;
+                    r.ZhiOtc = o.NHatOtc > 0 ? r.D * r.Awt * (r.Yi - o.ROtc) / o.NHatOtc : 0;
+                    sumZhiOtc += r.ZhiOtc;
                 }
-                else
+                else if (r.Vm == 1)
                 {
-                    r.Zhi = 0;
+                    r.ZhiVm = o.NHatVm > 0 ? r.D * r.Awt * (r.Yi - o.RVm) / o.NHatVm : 0;
+                    sumZhiVm += r.ZhiVm;
                 }
             }
             s.Mzh = sumZhi / s.Mh;
+            s.MzhOtc = sumZhiOtc / s.Mh;
+            s.MzhVm = sumZhiVm / s.Mh;
             s.Fpc = 1.0 - (double)s.Mh / s.Vcapn;
             o.Nn += s.Vcapn;
         }
         o.M = sumMhi;
-        // VBA: overallVals.Item("VSRS").value = sumMHI * VSRS * cv_w / ((sumMHI - 1) * n_Hat)
         if (sumMhi > 1 && o.NHat > 0)
             o.Vsrs = sumMhi * vsrsAccum * o.CvW / ((sumMhi - 1) * o.NHat);
     }
 
-    // VBA: CSPSSES.ComputeStatistics_Step5. Per stratum:
-    //   SH2 = MH * FPC * sum((ZHI - MZH)^2 over rows with r != 2) / (MH - 1)
-    // Overall: SE = sqrt(sum SH2).
+    // VBA: CSPSSES.ComputeStatistics_Step5. Per stratum, over rows with r != 2:
+    //   SH2 = MH * FPC * sum((ZHI - MZH)^2) / (MH - 1)
+    // and likewise for the OTC and VM residuals. SE = sqrt(sum of SH2).
     private static void Step5_StandardError(List<Stratum> strata, Overall o, bool withFpc)
     {
-        double seSq = 0;
+        double seSq = 0, seSqOtc = 0, seSqVm = 0;
         foreach (var s in strata)
         {
             var fpc = withFpc ? s.Fpc : 1.0;
             if (s.Mh == 1 && s.Vcapn == 1)
             {
-                s.Sh2 = 0;
+                s.Sh2 = s.Sh2Otc = s.Sh2Vm = 0;
                 continue;
             }
             if (s.Mh <= 1)
                 throw new InvalidOperationException(
                     $"Variance stratum '{s.Id}': MH = {s.Mh} insufficient for variance estimation.");
 
-            double sumSq = 0;
+            double sq = 0, sqOtc = 0, sqVm = 0;
             foreach (var r in s.Rows)
             {
-                if (r.RCode == DispositionCodes.Noncomplete) continue;  // r != 2
-                var dz = r.Zhi - s.Mzh;
-                sumSq += dz * dz;
+                if (r.RCode == DispositionCodes.Noncomplete) continue;
+                sq    += Square(r.Zhi - s.Mzh);
+                sqOtc += Square(r.ZhiOtc - s.MzhOtc);
+                sqVm  += Square(r.ZhiVm - s.MzhVm);
             }
-            s.Sh2 = s.Mh * fpc * sumSq / (s.Mh - 1);
+            s.Sh2    = s.Mh * fpc * sq / (s.Mh - 1);
+            s.Sh2Otc = s.Mh * fpc * sqOtc / (s.Mh - 1);
+            s.Sh2Vm  = s.Mh * fpc * sqVm / (s.Mh - 1);
             seSq += s.Sh2;
+            seSqOtc += s.Sh2Otc;
+            seSqVm += s.Sh2Vm;
         }
         o.Se = Math.Sqrt(seSq);
+        o.SeOtc = Math.Sqrt(seSqOtc);
+        o.SeVm = Math.Sqrt(seSqVm);
     }
 
-    // VBA: CSPSSES.ComputeStatistics_Step6. Confidence intervals, design
-    // effects, completion / accuracy rates -- all the summary numbers that
-    // appear on Table 1. Values flow through Overall and are read by the
-    // report builder.
-    private static void Step6_Summaries(List<Row> rows, List<Stratum> strata, Overall o)
-    {
-        // No-op -- BuildReport reads o.R, o.Se, o.M, etc. directly. CI and
-        // design-effect formulas live in BuildReport for clarity.
-    }
+    private static double Square(double x) => x * x;
+
+    // VBA CLng rounds half to even. Table 2 rounds each outlet type's
+    // estimated population this way before summing, so rows add to totals.
+    private static long CLng(double x) => (long)Math.Round(x, MidpointRounding.ToEven);
 
     private static SssReport BuildReport(
-        SssInput input, List<Stratum> strata, List<Row> rows, Overall o)
+        SssInput input, List<Stratum> strata, List<Row> rows, Overall o, bool withFpc)
     {
-        var stratumResults = strata.Select(s => new SamplingStratumResult
-        {
-            SamplingStratumId = s.Id,
-            VarianceStratumId = s.Id,
-            OutletFrameSize = s.Vcapn,
-            EstimatedPopulationSize = s.Rows.Sum(r => r.D * r.Awt),
-            OutletSampleSize = s.Vn,
-            EligibleOutletsInSample = s.Rows.Sum(r => r.D),
-            InspectedCount = s.Rows.Sum(r => r.Resp),
-            ViolationCount = s.Rows.Sum(r => r.Yi),
-            ViolationRate = s.Rows.Sum(r => r.D * r.Awt) > 0
-                ? s.Rows.Sum(r => r.D * r.Awt * r.Yi) / s.Rows.Sum(r => r.D * r.Awt)
-                : 0,
-            StandardError = null,  // per-stratum SE not produced on Table 2 (only Total row)
-        }).ToList();
-
         var inspectedRows = rows.Where(r => r.RCode == DispositionCodes.Complete).ToList();
 
-        // CIs from CSPSSES.ComputeStatistics_Step6:
-        //   LL = max(0, R - 1.96*SE)   UL = min(1, R + 1.96*SE)
-        //   UL2 = R + 1.645*SE (one-sided 95% upper)
+        // VBA: CSPSSES.ComputeStatistics_Step6.
         var ll = Math.Max(0.0, o.R - 1.96 * o.Se);
         var ul = Math.Min(1.0, o.R + 1.96 * o.Se);
         var ul2 = o.R + 1.645 * o.Se;
-        var samhsaMet = 1.645 * o.Se <= 0.03;
-        // Design effects: DEFF1 / DEFF2 / DEFF3 per the VBA. For an SRS-only
-        // KY design these tend to converge near 1.0 since the survey *is*
-        // simple random within the single stratum.
         double f = o.Nn > 0 ? (double)o.M / o.Nn : 0;
         double deff1 = (o.R > 0 && o.R < 1 && o.M > 1)
             ? (o.M - 1) * o.Se * o.Se / (o.R * (1 - o.R)) : 0;
         double deff2 = (o.R > 0 && o.R < 1 && o.M > 1 && f < 1)
             ? (o.M - 1) * o.Se * o.Se / (o.R * (1 - o.R) * (1 - f)) : 0;
-        double deff3 = (o.Vsrs > 0 && f < 1)
-            ? o.Se * o.Se / (o.Vsrs * (1 - f)) : 0;
+        // Table 1 reports DEFF3, and SSES reports 1 when the SE is zero.
+        double deff3 = o.Se == 0 ? 1 : (o.Vsrs > 0 && f < 1 ? o.Se * o.Se / (o.Vsrs * (1 - f)) : 0);
 
         var overall = new OverallStats
         {
@@ -364,124 +355,236 @@ public sealed class SssCalculator
             CiLower95 = ll,
             CiUpper95 = ul,
             CiUpperOneSided95 = ul2,
-            SamhsaPrecisionMet = samhsaMet,
+            SamhsaPrecisionMet = 1.645 * o.Se <= 0.03,
             DesignEffect1 = deff1,
             DesignEffect2 = deff2,
             DesignEffect3 = deff3,
+            OverallSamplingRate = f,
         };
 
-        var tally = new SampleTally
-        {
-            CountsByCode = rows
-                .GroupBy(r => r.Source.DispositionCode)
-                .ToDictionary(g => g.Key, g => g.Count())
-        };
-        var inspectors = BuildInspectorDemographics(inspectedRows);
-        var productCrossTab = BuildCrossTab(
-            "Product Type", inspectedRows,
-            r => MapProductType(r.Source.ProductType));
-        var outletCrossTab = BuildCrossTab(
-            "Retail Outlet", inspectedRows,
-            r => MapRetailOutlet(r.Source.RetailOutletType));
-        var askedCrossTab = BuildCrossTab(
-            "Clerk Asked for ID", inspectedRows,
-            r => MapAskedForId(r.Source.AskedForId));
+        var hasUnknown = rows.Any(r => r.Otc == 0 && r.Vm == 0);
 
         return new SssReport
         {
             StateCode = input.StateCode,
             FederalFiscalYear = input.FederalFiscalYear,
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = input.GeneratedAt ?? DateTime.Now,
+            DataSource = input.DataSource,
+            AnalysisOption = withFpc ? "Stratified SRS with FPC" : "Stratified SRS without FPC",
+            EffectiveSampleSize = input.EffectiveSampleSize,
+            TargetSampleSize = input.TargetSampleSize,
             Overall = overall,
-            StratumResults = stratumResults,
-            Tally = tally,
-            Inspectors = inspectors,
+            Table2 = BuildTable2(strata, o, hasUnknown),
+            HasUnknownOutletType = hasUnknown,
+            Tally = new SampleTally
+            {
+                CountsByCode = rows
+                    .GroupBy(r => r.Source.DispositionCode.Trim().ToUpperInvariant())
+                    .ToDictionary(g => g.Key, g => g.Count()),
+            },
+            Inspectors = BuildInspectorDemographics(inspectedRows),
             Microdata = input.Microdata,
-            ProductCrossTab = productCrossTab,
-            OutletCrossTab = outletCrossTab,
-            AskedForIdCrossTab = askedCrossTab,
+            ProductCrossTab = BuildCrossTab("Product Type", inspectedRows, r => MapProductType(r.Source.ProductType)),
+            OutletCrossTab = BuildCrossTab("Retail Outlet", inspectedRows, r => MapRetailOutlet(r.Source.RetailOutletType)),
+            AskedForIdCrossTab = BuildCrossTab("Clerk Asked for ID", inspectedRows, r => MapAskedForId(r.Source.AskedForId)),
         };
     }
 
-    // VBA: CSPInspectors.InitCounts. One cell per (gender, age) bucket
-    // (M/F x 14..20) plus a 14..20 column for buy attempts and successes.
-    // Inspector counts come from the distinct InspectorId seen for each
-    // (gender, age) pair across the EC rows.
+    // VBA: CSPSSES.Table2byStratum. Three blocks -- all outlets, then
+    // over-the-counter, then vending machines -- each with one row per
+    // stratum and a total. Estimated population is rounded per outlet type
+    // and the rounded parts summed, so each block adds up to its total.
+    private static IReadOnlyList<Table2Section> BuildTable2(List<Stratum> strata, Overall o, bool hasUnknown)
+    {
+        var all = new List<Table2Row>();
+        var otc = new List<Table2Row>();
+        var vm = new List<Table2Row>();
+
+        foreach (var s in strata)
+        {
+            var first = s.Rows[0].Source;
+            var samplingId = first.SamplingStratum;
+            var frame = first.SamplingStratumPopulation;
+            // VM frame size for the stratum; the OTC frame is whatever is left.
+            var vmFrame = s.Rows.Select(r => r.Source.VmFrameSize).FirstOrDefault(x => x.HasValue) ?? 0;
+            var otcFrame = vmFrame > 0 ? frame - vmFrame : frame;
+
+            double nh = 0, nhOtc = 0, nhVm = 0, nhMissing = 0, y = 0, yOtc = 0, yVm = 0;
+            foreach (var r in s.Rows)
+            {
+                nh += r.D * r.Awt;
+                nhOtc += r.D * r.Awt * r.Otc;
+                nhVm += r.D * r.Awt * r.Vm;
+                if (r.Otc == 0 && r.Vm == 0) nhMissing += r.D * r.Awt;
+                if (r.D == 1 && r.Yi == 1)
+                {
+                    y += r.Awt;
+                    if (r.Otc == 1) yOtc += r.Awt;
+                    else if (r.Vm == 1) yVm += r.Awt;
+                }
+            }
+
+            var estOtc = CLng(nhOtc);
+            var estVm = CLng(nhVm);
+            var estAll = estOtc + estVm + (hasUnknown ? CLng(nhMissing) : 0);
+
+            all.Add(MakeRow(samplingId, s.Id, frame, estAll, s.Rows, _ => true, nh > 0 ? y / nh : 0));
+            otc.Add(MakeRow(samplingId, s.Id, otcFrame, estOtc, s.Rows, r => r.Otc == 1, nhOtc > 0 ? yOtc / nhOtc : 0));
+            vm.Add(MakeRow(samplingId, s.Id, vmFrame, estVm, s.Rows, r => r.Vm == 1, nhVm > 0 ? yVm / nhVm : 0));
+        }
+
+        return new[]
+        {
+            MakeSection("All Outlets", all, o.R, o.Se),
+            MakeSection("Over the Counter Outlets", otc, o.ROtc, o.SeOtc),
+            MakeSection("Vending Machines", vm, o.RVm, o.SeVm),
+        };
+    }
+
+    private static Table2Row MakeRow(string samplingId, string varianceId, int frame, long est,
+                                     List<Row> rows, Func<Row, bool> inDomain, double rate)
+    {
+        var d = rows.Where(inDomain).ToList();
+        return new Table2Row
+        {
+            SamplingStratumId = samplingId,
+            VarianceStratumId = varianceId,
+            OutletFrameSize = frame,
+            EstimatedPopulationSize = est,
+            OutletSampleSize = d.Count,
+            EligibleOutletsInSample = d.Sum(r => r.D),
+            InspectedCount = d.Sum(r => r.Resp),
+            ViolationCount = d.Sum(r => r.Yi),
+            ViolationRate = rate,
+        };
+    }
+
+    private static Table2Section MakeSection(string label, List<Table2Row> rows, double rate, double se) => new()
+    {
+        Label = label,
+        Strata = rows,
+        StandardError = se,
+        Total = new Table2Row
+        {
+            SamplingStratumId = "",
+            VarianceStratumId = "",
+            OutletFrameSize = rows.Sum(r => r.OutletFrameSize),
+            EstimatedPopulationSize = rows.Sum(r => r.EstimatedPopulationSize),
+            OutletSampleSize = rows.Sum(r => r.OutletSampleSize),
+            EligibleOutletsInSample = rows.Sum(r => r.EligibleOutletsInSample),
+            InspectedCount = rows.Sum(r => r.InspectedCount),
+            ViolationCount = rows.Sum(r => r.ViolationCount),
+            ViolationRate = rate,
+        },
+    };
+
+    // VBA: CSPInspectors.GenerateResults. Each inspector is counted once,
+    // under their own gender and age, with every buy they attempted. An
+    // inspector whose age is outside 14-20, or whose gender is missing, goes
+    // to "Other". Inspectors with no completed inspection are dropped
+    // (RemoveUnUsed), which falls out of working from completed rows only.
     private static InspectorDemographics BuildInspectorDemographics(List<Row> inspectedRows)
     {
-        var cells = new List<InspectorAgeCell>();
-        foreach (var gender in new[] { "M", "F" })
+        var cells = new Dictionary<(string Gender, int Age), (int Inspectors, int Attempts, int Sales)>();
+        int otherCount = 0, otherAttempts = 0, otherSales = 0, total = 0;
+
+        foreach (var inspector in inspectedRows.GroupBy(r => (r.Source.InspectorId ?? "").Trim()))
         {
-            for (var age = 14; age <= 20; age++)
+            total++;
+            var gender = inspector.Select(r => NormaliseGender(r.Source.InspectorGender))
+                                  .FirstOrDefault(g => g is not null);
+            var age = inspector.Select(r => r.Source.InspectorAge).FirstOrDefault(a => a.HasValue);
+            var attempts = inspector.Count();
+            var sales = inspector.Count(r => r.Yi == 1);
+
+            if (gender is null || age is null || age < 14 || age > 20)
             {
-                var bucket = inspectedRows
-                    .Where(r => r.Source.InspectorGender == gender
-                             && r.Source.InspectorAge == age)
-                    .ToList();
-                cells.Add(new InspectorAgeCell
+                otherCount++;
+                otherAttempts += attempts;
+                otherSales += sales;
+                continue;
+            }
+            var key = (gender, age.Value);
+            cells.TryGetValue(key, out var c);
+            cells[key] = (c.Inspectors + 1, c.Attempts + attempts, c.Sales + sales);
+        }
+
+        var list = new List<InspectorAgeCell>();
+        foreach (var g in new[] { "M", "F" })
+        {
+            for (var a = 14; a <= 20; a++)
+            {
+                cells.TryGetValue((g, a), out var c);
+                list.Add(new InspectorAgeCell
                 {
-                    Gender = gender,
-                    Age = age,
-                    InspectorCount = bucket
-                        .Select(r => r.Source.InspectorId)
-                        .Where(id => !string.IsNullOrEmpty(id))
-                        .Distinct()
-                        .Count(),
-                    AttemptedBuys  = bucket.Count,
-                    SuccessfulBuys = bucket.Count(r => r.Yi == 1),
+                    Gender = g,
+                    Age = a,
+                    InspectorCount = c.Inspectors,
+                    AttemptedBuys = c.Attempts,
+                    SuccessfulBuys = c.Sales,
                 });
             }
         }
-        return new InspectorDemographics { Cells = cells };
+
+        return new InspectorDemographics
+        {
+            Cells = list,
+            OtherInspectorCount = otherCount,
+            OtherAttemptedBuys = otherAttempts,
+            OtherSuccessfulBuys = otherSales,
+            TotalInspectorCount = total,
+        };
     }
 
-    // VBA: CSPProducts / CSPOutlets / CSPCKIDS InitCounts. All three share the
-    // same shape: bucket inspected (rcode=1) rows by a categorical attribute,
-    // emit attempted/successful counts + violation rate, and the same numbers
-    // pivoted by inspector age x gender. Categories include a "Missing"
-    // bucket for blank values (which is how KY records Clerk-asked-for-ID
-    // and Retail-outlet today).
-    private static CrossTab BuildCrossTab(
-        string label,
-        List<Row> inspectedRows,
-        Func<Row, string> categorize)
+    // VBA: CSPProducts / CSPOutlets / CSPCKIDS InitCounts. The left side counts
+    // completed inspections by category. The pivot keeps, for each gender, the
+    // same counts by category and age, plus the all-category and all-age
+    // margins that the right-hand tables print.
+    private static CrossTab BuildCrossTab(string label, List<Row> inspectedRows, Func<Row, string> categorize)
     {
-        var groups = inspectedRows
-            .Select(r => (Cat: categorize(r), Row: r))
-            .GroupBy(t => t.Cat)
+        var left = inspectedRows
+            .GroupBy(categorize)
             .Select(g => new CrossTabRow
             {
                 Category = g.Key,
-                AttemptedBuys  = g.Count(),
-                SuccessfulBuys = g.Count(t => t.Row.Yi == 1),
-                ViolationRate = g.Count() > 0
-                    ? (double)g.Count(t => t.Row.Yi == 1) / g.Count() : 0,
-                RateByGenderAge = BuildRateByGenderAge(g.Select(t => t.Row).ToList()),
+                AttemptedBuys = g.Count(),
+                SuccessfulBuys = g.Count(r => r.Yi == 1),
+                ViolationRate = (double)g.Count(r => r.Yi == 1) / g.Count(),
             })
-            .OrderBy(r => r.Category)
             .ToList();
-        return new CrossTab { CategoryLabel = label, Rows = groups };
-    }
 
-    private static IReadOnlyDictionary<(string Gender, int Age), double> BuildRateByGenderAge(List<Row> rows)
-    {
-        var dict = new Dictionary<(string Gender, int Age), double>();
-        foreach (var gender in new[] { "M", "F" })
+        var pivot = new Dictionary<PivotKey, BuyCount>();
+        void Add(PivotKey key, BuyCount value) =>
+            pivot[key] = pivot.TryGetValue(key, out var cur) ? cur.Add(value) : value;
+
+        foreach (var r in inspectedRows)
         {
-            for (var age = 14; age <= 20; age++)
+            var gender = NormaliseGender(r.Source.InspectorGender);
+            if (gender is null) continue;
+            var cat = categorize(r);
+            var one = new BuyCount(1, r.Yi);
+            Add(new PivotKey(cat, gender, null), one);
+            Add(new PivotKey(null, gender, null), one);
+            if (r.Source.InspectorAge is int age)
             {
-                var bucket = rows.Where(r => r.Source.InspectorGender == gender
-                                          && r.Source.InspectorAge == age).ToList();
-                dict[(gender, age)] = bucket.Count > 0
-                    ? (double)bucket.Count(r => r.Yi == 1) / bucket.Count : 0;
+                Add(new PivotKey(cat, gender, age), one);
+                Add(new PivotKey(null, gender, age), one);
             }
         }
-        return dict;
+
+        return new CrossTab { CategoryLabel = label, Rows = left, Pivot = pivot };
     }
 
-    // Category labels below are SAMHSA's, exactly as they appear on the
-    // printed Tables 6-8. SssWorkbookWriter emits the full fixed list in a
-    // fixed order, so these strings have to match it character for character.
+    private static string? NormaliseGender(string? g)
+    {
+        var u = (g ?? "").Trim().ToUpperInvariant();
+        return u is "M" or "F" ? u : null;
+    }
+
+    // Category labels are SAMHSA's, exactly as printed on Tables 6-8, and the
+    // codes are those in Tables 5.3 and 5.4 of the SSES manual. The workbook
+    // writer emits each table's full category list in a fixed order, so these
+    // strings must match it character for character.
     private static string MapProductType(int? code) => code switch
     {
         1 => "Cigarettes",
@@ -506,14 +609,15 @@ public sealed class SssCalculator
         _ => "Invalid",
     };
 
+    // The manual codes this column "Y" or "N" only; anything else is Invalid.
     private static string MapAskedForId(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value)) return "Missing";
-        var u = value.Trim().ToUpperInvariant();
+        var u = (value ?? "").Trim().ToUpperInvariant();
         return u switch
         {
-            "Y" or "YES" or "1" => "Yes",
-            "N" or "NO"  or "0" => "No",
+            "" => "Missing",
+            "Y" => "Yes",
+            "N" => "No",
             _ => "Invalid",
         };
     }

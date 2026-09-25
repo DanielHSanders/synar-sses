@@ -11,6 +11,8 @@ public sealed class SampleRecord
     public DateTime DrawnAt { get; init; }
     public int FrameSize { get; init; }
     public string? FrameFilter { get; init; }
+    public int? EffectiveSampleSize { get; init; }
+    public int? TargetSampleSize { get; init; }
     public int? OriginalSampleSize { get; init; }
     public bool IsFinal { get; init; }
     public string? Note { get; init; }

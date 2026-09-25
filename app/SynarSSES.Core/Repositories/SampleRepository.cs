@@ -20,7 +20,8 @@ public sealed class SampleRepository
     {
         const string sql = """
             SELECT sample_id, check_year, state_code, drawn_at, frame_size,
-                   frame_filter, original_sample_size, is_final, note
+                   frame_filter, effective_sample_size, target_sample_size,
+                   original_sample_size, is_final, note
             FROM synar_sample
             WHERE check_year = @CheckYear
             ORDER BY is_final DESC, drawn_at DESC

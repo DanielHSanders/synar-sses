@@ -1,286 +1,373 @@
+using System.Globalization;
 using ClosedXML.Excel;
 using SynarSSES.Core.Models;
 
 namespace SynarSSES.Core.Services;
 
-// Writes an SssReport to the SAMHSA-formatted xlsx workbook (Tables 1-8).
-// Cell positions match the layout of Synar2025_SSES_Final.xlsx so the
-// resulting file is a drop-in replacement.
+// Writes an SssReport to the SAMHSA workbook (Tables 1-8). Cell positions,
+// labels and number formats follow what SSES v7.0 itself produces -- checked
+// cell by cell against Synar2025_SSES_Final.xlsx and the FFY 2027 run -- so
+// the file reads the same to a reviewer who knows the legacy output.
+//
+// The one deliberate difference is the Program Version line on Table 1. SSES
+// stamps "Version 7.0" there, and SAMHSA reads that line to confirm SSES v7.0
+// was used; this app says what it actually is.
 public sealed class SssWorkbookWriter
 {
+    public const string ProgramVersion = "SynarSSES (port of SSES Version 7.0)";
+
+    private const string Pct1 = "#,##0.0%";
+    private const string Int = "#,##0";
+    private const string Pct1Short = "0.0%";
+    private const string Pct1Rate = "##0.0%";
+
+    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
     public byte[] Write(SssReport report)
     {
         using var wb = new XLWorkbook();
-        WriteTable1(wb.AddWorksheet("Table1"),   report);
-        WriteTable2(wb.AddWorksheet("Table2"),   report);
-        WriteTable3(wb.AddWorksheet("Table3"),   report);
-        WriteTable4(wb.AddWorksheet("Table4"),   report);
-        WriteTable5(wb.AddWorksheet("Table 5"),  report);
-        WriteTable6(wb.AddWorksheet("Table6"),   report);
-        WriteTable7(wb.AddWorksheet("Table7"),   report);
-        WriteTable8(wb.AddWorksheet("Table8"),   report);
+        WriteTable1(wb.AddWorksheet("Table1"), report);
+        WriteTable2(wb.AddWorksheet("Table2"), report);
+        WriteTable3(wb.AddWorksheet("Table3"), report);
+        WriteTable4(wb.AddWorksheet("Table4"), report);
+        WriteTable5(wb.AddWorksheet("Table 5"), report);
+        WriteCrossTab(wb.AddWorksheet("Table6"), report, report.ProductCrossTab,
+            "SSES Table (Synar Survey Inspection Results by Type of Product)",
+            "Buy Rate by Type of Product, Age, and Gender", ProductCategories);
+        WriteCrossTab(wb.AddWorksheet("Table7"), report, report.OutletCrossTab,
+            "SSES Table (Synar Survey Inspection Results by Type of Retail Outlet)",
+            "Buy Rate by Type of Retail Outlet, Age, and Gender", RetailOutletCategories);
+        WriteCrossTab(wb.AddWorksheet("Table8"), report, report.AskedForIdCrossTab,
+            "SSES Table (Synar Survey Inspection Results by Clerk Asked for ID)",
+            "Buy Rate by Clerk Asked for ID, Age, and Gender", AskedForIdCategories);
 
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         return ms.ToArray();
     }
 
-    // Table 1: cover sheet with headline numbers. Matches the row layout of
-    // Synar2025_SSES_Final.xlsx (R3=CSAP-SYNAR REPORT, R4=State, etc.).
-    private static void WriteTable1(IXLWorksheet ws, SssReport report)
+    private static void Set(IXLWorksheet ws, int row, int col, XLCellValue value, string? format = null)
     {
-        ws.Cell("A1").Value = "SSES Table 1 (Synar Survey Estimates and Sample Sizes)";
-        ws.Cell("B3").Value = "CSAP-SYNAR REPORT";
-        ws.Cell("B4").Value = "State";                                ws.Cell("C4").Value = report.StateCode;
-        ws.Cell("B5").Value = "Federal Fiscal Year (FFY)";            ws.Cell("C5").Value = report.FederalFiscalYear;
-        ws.Cell("B6").Value = "Date";                                 ws.Cell("C6").Value = report.GeneratedAt.ToString("yyyy-MM-dd HH:mm:ss");
-        ws.Cell("B7").Value = "Data";                                 ws.Cell("C7").Value = "synarcheck";
-        ws.Cell("B8").Value = "Program Version";                      ws.Cell("C8").Value = "SynarSSES 0.1";
-        ws.Cell("B9").Value = "Analysis Option";                      ws.Cell("C9").Value = "Stratified SRS with FPC";
-
-        ws.Cell("B11").Value = "Estimates";
-        ws.Cell("B12").Value = "Unweighted Retailer Violation Rate";  ws.Cell("C12").Value = report.Overall.UnweightedRvr;
-        ws.Cell("B13").Value = "Weighted Retailer Violation Rate";    ws.Cell("C13").Value = report.Overall.WeightedRvr;
-        ws.Cell("B14").Value = "Standard Error";                      ws.Cell("C14").Value = report.Overall.StandardError;
-        ws.Cell("B15").Value = "Is SAMHSA Precision Requirement Met"; ws.Cell("C15").Value = report.Overall.SamhsaPrecisionMet ? "YES" : "NO";
-        ws.Cell("B16").Value = "Right-sided 95% Confidence Interval"; ws.Cell("C16").Value = FormatOneSidedCi(report.Overall);
-        ws.Cell("B17").Value = "Two-sided 95% Confidence Interval";   ws.Cell("C17").Value = FormatTwoSidedCi(report.Overall);
-        ws.Cell("B18").Value = "Design Effect";                       ws.Cell("C18").Value = report.Overall.DesignEffect3;
-        ws.Cell("B19").Value = "Accuracy Rate (unweighted)";          ws.Cell("C19").Value = report.Overall.UnweightedAccuracyRate;
-        ws.Cell("B20").Value = "Accuracy Rate (weighted)";            ws.Cell("C20").Value = report.Overall.WeightedAccuracyRate;
-        ws.Cell("B21").Value = "Completion Rate (unweighted)";        ws.Cell("C21").Value = report.Overall.CompletionRate;
+        var c = ws.Cell(row, col);
+        c.Value = value;
+        if (format is not null) c.Style.NumberFormat.Format = format;
     }
 
-    private static string FormatOneSidedCi(OverallStats o)
-        => $"[0.0%, {o.CiUpperOneSided95 * 100:0.0}%]";
+    // Stratum ids that are whole numbers are written as numbers, as SSES does.
+    private static XLCellValue Id(string id) =>
+        int.TryParse(id, NumberStyles.Integer, Inv, out var n) ? n : id;
 
-    private static string FormatTwoSidedCi(OverallStats o)
-        => $"[{o.CiLower95 * 100:0.0}%, {o.CiUpper95 * 100:0.0}%]";
+    // ---------------------------------------------------------------- Table 1
 
-    // Table 2: per-stratum results, split into All Outlets / OTC / VM
-    // sections. The "Total" row at the bottom of each section is the only
-    // place where the standard error appears.
-    private static void WriteTable2(IXLWorksheet ws, SssReport report)
+    private static void WriteTable1(IXLWorksheet ws, SssReport r)
     {
-        ws.Cell("A1").Value = "SSES Table 2 (Synar Survey Results by Stratum)";
-        ws.Cell("J1").Value = $"STATE: {report.StateCode}";
-        ws.Cell("J2").Value = $"FFY: {report.FederalFiscalYear}";
+        var o = r.Overall;
+        Set(ws, 1, 1, "SSES Table 1 (Synar Survey Estimates and Sample Sizes)");
+        Set(ws, 3, 2, "CSAP-SYNAR REPORT");
+        Set(ws, 4, 2, "State");                     Set(ws, 4, 3, r.StateCode);
+        Set(ws, 5, 2, "Federal Fiscal Year (FFY)"); Set(ws, 5, 3, r.FederalFiscalYear);
+        Set(ws, 6, 2, "Date");                      Set(ws, 6, 3, r.GeneratedAt, "m/d/yy h:mm");
+        Set(ws, 7, 2, "Data");                      Set(ws, 7, 3, r.DataSource);
+        Set(ws, 8, 2, "Program Version");           Set(ws, 8, 3, ProgramVersion);
+        Set(ws, 9, 2, "Analysis Option");           Set(ws, 9, 3, r.AnalysisOption);
 
-        // Header row 4
+        Set(ws, 11, 2, "Estimates");
+        Set(ws, 12, 2, "Unweighted Retailer Violation Rate");   Set(ws, 12, 3, o.UnweightedRvr, Pct1);
+        Set(ws, 13, 2, "Weighted Retailer Violation Rate");     Set(ws, 13, 3, o.WeightedRvr, Pct1);
+        Set(ws, 14, 2, "Standard Error");                       Set(ws, 14, 3, o.StandardError, Pct1);
+        Set(ws, 15, 2, "Is SAMHSA Precision Requirement met?"); Set(ws, 15, 3, o.SamhsaPrecisionMet ? "YES" : "NO");
+        Set(ws, 16, 2, "Right-sided 95% Confidence Interval");
+        Set(ws, 16, 3, "[0.0%, " + Percent(o.CiUpperOneSided95) + "]");
+        Set(ws, 17, 2, "Two-sided 95% Confidence Interval");
+        Set(ws, 17, 3, "[" + Percent(o.CiLower95) + ", " + Percent(o.CiUpper95) + "]");
+        Set(ws, 18, 2, "Design Effect");                  Set(ws, 18, 3, o.DesignEffect3, "#,##0.0");
+        Set(ws, 19, 2, "Accuracy Rate (unweighted)");     Set(ws, 19, 3, o.UnweightedAccuracyRate, Pct1);
+        Set(ws, 20, 2, "Accuracy Rate (weighted)");       Set(ws, 20, 3, o.WeightedAccuracyRate, Pct1);
+        Set(ws, 21, 2, "Completion Rate (unweighted)");   Set(ws, 21, 3, o.CompletionRate, Pct1);
+
+        // Effective and target sizes are what the operator types in when SSES
+        // runs; the remaining four are derived from the data.
+        Set(ws, 23, 2, "Sample Size for Current Year");
+        Set(ws, 24, 2, "Effective Sample Size");
+        if (r.EffectiveSampleSize is int eff) Set(ws, 24, 3, eff, Int);
+        Set(ws, 25, 2, "Target (Minimum) Sample Size");
+        if (r.TargetSampleSize is int tss) Set(ws, 25, 3, tss, Int);
+        Set(ws, 26, 2, "Original Sample Size");  Set(ws, 26, 3, o.SampleSize, Int);
+        Set(ws, 27, 2, "Eligible Sample Size "); Set(ws, 27, 3, o.EligibleSampleSize, Int);
+        Set(ws, 28, 2, "Final Sample Size");     Set(ws, 28, 3, o.InspectedCount);
+        Set(ws, 29, 2, "Overall Sampling Rate"); Set(ws, 29, 3, o.OverallSamplingRate, Pct1);
+    }
+
+    // VBA Format(x, "0.0%").
+    private static string Percent(double x) =>
+        (x * 100).ToString("0.0", Inv) + "%";
+
+    // ---------------------------------------------------------------- Table 2
+
+    private static void WriteTable2(IXLWorksheet ws, SssReport r)
+    {
+        Set(ws, 1, 1, "SSES Table 2 (Synar Survey Results by Stratum and by OTC/VM)");
+        Set(ws, 1, 10, "STATE: " + r.StateCode);
+        Set(ws, 2, 10, "FFY: " + r.FederalFiscalYear);
+
         var headers = new[]
         {
-            "Samp. Stratum", "Var. Stratum", "Outlet Frame Size",
-            "Estimated Outlet Population Size",
-            "Number of PSU Clusters Created", "Number of PSU Clusters in Sample",
-            "Outlet Sample Size", "Number of Eligible Outlets in Sample",
-            "Number of Sample Outlets Inspected", "Number of Sample Outlets in Violation",
-            "Retailer Violation Rate(%)", "Standard Error(%)",
+            "Samp. Stratum", "Var. Stratum", "Outlet Frame Size", "Estimated Outlet Population Size",
+            "Number of PSU Clusters Created", "Number of PSU Clusters in Sample", "Outlet Sample Size",
+            "Number of Eligible Outlets in Sample", "Number of Sample Outlets Inspected",
+            "Number of Sample Outlets in Violation", "Retailer Violation Rate(%)", "Standard Error(%)",
         };
-        for (var i = 0; i < headers.Length; i++)
-            ws.Cell(4, i + 1).Value = headers[i];
+        for (var i = 0; i < headers.Length; i++) Set(ws, 4, i + 1, headers[i], "@");
 
-        // For KY: only one stratum, and all outlets are treated as OTC. The
-        // VM section is emitted but zeroed. Sections start at rows 5, 8, 11.
-        WriteTable2Section(ws, 5,  "All Outlets",              report);
-        WriteTable2Section(ws, 8,  "Over the Counter Outlets", report);
-        WriteTable2Section(ws, 11, "Vending Machines",         report, zeroed: true);
-    }
-
-    private static void WriteTable2Section(IXLWorksheet ws, int headerRow, string label, SssReport report, bool zeroed = false)
-    {
-        ws.Cell(headerRow, 1).Value = label;
-        var dataRow = headerRow + 1;
-        foreach (var s in report.StratumResults)
+        var row = 5;
+        foreach (var section in r.Table2)
         {
-            ws.Cell(dataRow, 1).Value = s.SamplingStratumId;
-            ws.Cell(dataRow, 2).Value = s.VarianceStratumId;
-            ws.Cell(dataRow, 3).Value = zeroed ? 0 : s.OutletFrameSize;
-            ws.Cell(dataRow, 4).Value = zeroed ? 0 : s.EstimatedPopulationSize;
-            ws.Cell(dataRow, 5).Value = "N/A";
-            ws.Cell(dataRow, 6).Value = "N/A";
-            ws.Cell(dataRow, 7).Value = zeroed ? 0 : s.OutletSampleSize;
-            ws.Cell(dataRow, 8).Value = zeroed ? 0 : s.EligibleOutletsInSample;
-            ws.Cell(dataRow, 9).Value = zeroed ? 0 : s.InspectedCount;
-            ws.Cell(dataRow, 10).Value = zeroed ? 0 : s.ViolationCount;
-            ws.Cell(dataRow, 11).Value = zeroed ? 0 : s.ViolationRate;
-            dataRow++;
+            Set(ws, row++, 1, section.Label);
+            foreach (var s in section.Strata)
+            {
+                Set(ws, row, 1, Id(s.SamplingStratumId));
+                Set(ws, row, 2, Id(s.VarianceStratumId));
+                WriteTable2Counts(ws, row, s);
+                Set(ws, row, 5, "N/A");
+                Set(ws, row, 6, "N/A");
+                row++;
+            }
+            Set(ws, row, 1, "Total");
+            WriteTable2Counts(ws, row, section.Total);
+            Set(ws, row, 12, section.StandardError, Pct1);
+            row++;
         }
-        ws.Cell(dataRow, 1).Value = "Total";
-        ws.Cell(dataRow, 3).Value = zeroed ? 0 : report.StratumResults.Sum(s => s.OutletFrameSize);
-        ws.Cell(dataRow, 4).Value = zeroed ? 0 : report.StratumResults.Sum(s => s.EstimatedPopulationSize);
-        ws.Cell(dataRow, 7).Value = zeroed ? 0 : report.Overall.SampleSize;
-        ws.Cell(dataRow, 8).Value = zeroed ? 0 : report.Overall.EligibleSampleSize;
-        ws.Cell(dataRow, 9).Value = zeroed ? 0 : report.Overall.InspectedCount;
-        ws.Cell(dataRow, 10).Value = zeroed ? 0 : report.Overall.ViolationCount;
-        ws.Cell(dataRow, 11).Value = zeroed ? 0 : report.Overall.WeightedRvr;
-        ws.Cell(dataRow, 12).Value = zeroed ? 0 : report.Overall.StandardError;
+
+        if (r.HasUnknownOutletType)
+        {
+            Set(ws, row + 1, 1, "Note:");
+            Set(ws, row + 1, 2, "There are some records with unknown outlet type. Therefore the overall counts may not equal the sum of OTC and VM counts.");
+        }
     }
+
+    private static void WriteTable2Counts(IXLWorksheet ws, int row, Table2Row s)
+    {
+        Set(ws, row, 3, s.OutletFrameSize, Int);
+        Set(ws, row, 4, s.EstimatedPopulationSize, Int);
+        Set(ws, row, 7, s.OutletSampleSize, Int);
+        Set(ws, row, 8, s.EligibleOutletsInSample, Int);
+        Set(ws, row, 9, s.InspectedCount, Int);
+        Set(ws, row, 10, s.ViolationCount, Int);
+        Set(ws, row, 11, s.ViolationRate, Pct1);
+    }
+
+    // ---------------------------------------------------------------- Table 3
 
     private static readonly (string Code, string Description, char Section)[] DispositionRows =
     {
-        ("EC", "Eligible and inspection complete outlet",                'E'),
-        ("N1", "In operation but closed at time of visit",                'N'),
-        ("N2", "Unsafe to access",                                         'N'),
-        ("N3", "Presence of police",                                       'N'),
-        ("N4", "Youth inspector knows salesperson",                        'N'),
-        ("N5", "Moved to new location but not inspected",                  'N'),
-        ("N6", "Drive thru only/youth inspector has no drivers license",   'N'),
-        ("N7", "Tobacco out of stock",                                     'N'),
-        ("N8", "Run out of time",                                          'N'),
-        ("N9", "Other noncompletion",                                      'N'),
-        ("I1", "Out of Business",                                          'I'),
-        ("I2", "Does not sell tobacco products",                           'I'),
-        ("I3", "Inaccessible by youth",                                    'I'),
-        ("I4", "Private club or private residence",                        'I'),
-        ("I5", "Temporary closure",                                        'I'),
-        ("I6", "Can't be located",                                         'I'),
-        ("I7", "Wholesale only/Carton sale only",                          'I'),
-        ("I8", "Vending machine broken",                                   'I'),
-        ("I9", "Duplicate",                                                'I'),
-        ("I10","Other ineligibility",                                      'I'),
+        ("EC", "Eligible and inspection complete outlet",              'E'),
+        ("N1", "In operation but closed at time of visit",              'N'),
+        ("N2", "Unsafe to access",                                       'N'),
+        ("N3", "Presence of police",                                     'N'),
+        ("N4", "Youth inspector knows salesperson",                      'N'),
+        ("N5", "Moved to new location but not inspected",                'N'),
+        ("N6", "Drive thru only/youth inspector has no drivers license", 'N'),
+        ("N7", "Tobacco out of stock",                                   'N'),
+        ("N8", "Run out of time",                                        'N'),
+        ("N9", "Other noncompletion",                                    'N'),
+        ("I1", "Out of Business",                                        'I'),
+        ("I2", "Does not sell tobacco products",                         'I'),
+        ("I3", "Inaccessible by youth",                                  'I'),
+        ("I4", "Private club or private residence",                      'I'),
+        ("I5", "Temporary closure",                                      'I'),
+        ("I6", "Can't be located",                                       'I'),
+        ("I7", "Wholesale only/Carton sale only",                        'I'),
+        ("I8", "Vending machine broken",                                 'I'),
+        ("I9", "Duplicate",                                              'I'),
+        ("I10", "Other ineligibility",                                   'I'),
     };
 
-    // Table 3: sample tally by disposition code, with subtotals for the three
-    // sections (Eligible Completes, Eligible Noncompletes, Ineligible).
-    private static void WriteTable3(IXLWorksheet ws, SssReport report)
+    private static readonly Dictionary<char, string> SubtotalLabels = new()
     {
-        ws.Cell("A1").Value = "SSES Table 3 (Synar Survey Sample Tally by Disposition Code)";
-        ws.Cell("D1").Value = $"STATE: {report.StateCode}";
-        ws.Cell("D2").Value = $"FFY: {report.FederalFiscalYear}";
+        ['E'] = "Total (Eligible Completes)",
+        ['N'] = "Total (Eligible Noncompletes)",
+        ['I'] = "Total (Ineligibles)",
+    };
 
-        ws.Cell("B4").Value = "Disposition Code";
-        ws.Cell("C4").Value = "Description";
-        ws.Cell("D4").Value = "Count";
-        ws.Cell("E4").Value = "Subtotal";
+    private static void WriteTable3(IXLWorksheet ws, SssReport r)
+    {
+        Set(ws, 1, 1, "SSES Table 3 (Synar Survey Sample Tally Summary)");
+        Set(ws, 1, 4, "STATE: " + r.StateCode);
+        Set(ws, 2, 4, "FFY: " + r.FederalFiscalYear);
+        Set(ws, 4, 2, "Disposition Code");
+        Set(ws, 4, 3, "Description");
+        Set(ws, 4, 4, "Count");
+        Set(ws, 4, 5, "Subtotal");
+
+        int Count(string code) => r.Tally.CountsByCode.TryGetValue(code, out var c) ? c : 0;
+        var otherNoncomplete = Count("N9") > 0;
+        var otherIneligible = Count("I10") > 0;
 
         var row = 5;
-        int ecSubtotal = 0, nSubtotal = 0, iSubtotal = 0;
-        char prevSection = ' ';
-        foreach (var (code, description, section) in DispositionRows)
+        var grand = 0;
+        foreach (var section in new[] { 'E', 'N', 'I' })
         {
-            if (prevSection != ' ' && prevSection != section)
+            var subtotal = 0;
+            foreach (var (code, description, sec) in DispositionRows.Where(d => d.Section == section))
             {
-                WriteSubtotalRow(ws, row++, prevSection, ecSubtotal, nSubtotal, iSubtotal);
-            }
-            var count = report.Tally.CountsByCode.TryGetValue(code, out var c) ? c : 0;
-            ws.Cell(row, 2).Value = code;
-            ws.Cell(row, 3).Value = description;
-            ws.Cell(row, 4).Value = count;
-            row++;
-            if (section == 'E') ecSubtotal += count;
-            if (section == 'N') nSubtotal += count;
-            if (section == 'I') iSubtotal += count;
-            prevSection = section;
-        }
-        WriteSubtotalRow(ws, row++, 'I', ecSubtotal, nSubtotal, iSubtotal);
-        ws.Cell(row, 2).Value = "Grand Total";
-        ws.Cell(row, 5).Value = ecSubtotal + nSubtotal + iSubtotal;
-    }
-
-    private static void WriteSubtotalRow(IXLWorksheet ws, int row, char justClosedSection, int ec, int n, int i)
-    {
-        var (label, value) = justClosedSection switch
-        {
-            'E' => ("Total (Eligible Completes)",    ec),
-            'N' => ("Total (Eligible Noncompletes)", n),
-            'I' => ("Total (Ineligible)",            i),
-            _   => ("",                              0),
-        };
-        ws.Cell(row, 2).Value = label;
-        ws.Cell(row, 5).Value = value;
-    }
-
-    // Table 4: inspector demographics (gender x age 14..20). For each gender
-    // block, list ages 14-20 then a Subtotal row. End with a Grand Total.
-    private static void WriteTable4(IXLWorksheet ws, SssReport report)
-    {
-        ws.Cell("A1").Value = "SSES Table 4 (Synar Survey Inspection Results by Inspector Demographics)";
-        ws.Cell("H3").Value = $"STATE: {report.StateCode}";
-        ws.Cell("H4").Value = $"FFY: {report.FederalFiscalYear}";
-        ws.Cell("C5").Value = "Frequency Distribution";
-        ws.Cell("C6").Value = "Gender";
-        ws.Cell("D6").Value = "Age";
-        ws.Cell("E6").Value = "Number of Inspectors";
-        ws.Cell("F6").Value = "Attempted Buys";
-        ws.Cell("G6").Value = "Successful Buys";
-
-        var row = 7;
-        foreach (var gender in new[] { ("M", "Male"), ("F", "Female") })
-        {
-            ws.Cell(row, 3).Value = gender.Item2;
-            var subtotalInspectors = 0;
-            var subtotalAttempts = 0;
-            var subtotalSuccesses = 0;
-            for (var age = 14; age <= 20; age++)
-            {
-                var cell = report.Inspectors.Cells.FirstOrDefault(c => c.Gender == gender.Item1 && c.Age == age);
-                ws.Cell(row, 4).Value = age;
-                ws.Cell(row, 5).Value = cell?.InspectorCount ?? 0;
-                ws.Cell(row, 6).Value = cell?.AttemptedBuys  ?? 0;
-                ws.Cell(row, 7).Value = cell?.SuccessfulBuys ?? 0;
-                subtotalInspectors += cell?.InspectorCount  ?? 0;
-                subtotalAttempts   += cell?.AttemptedBuys   ?? 0;
-                subtotalSuccesses  += cell?.SuccessfulBuys  ?? 0;
+                var n = Count(code);
+                var seeBelow = (code == "N9" && otherNoncomplete) || (code == "I10" && otherIneligible);
+                Set(ws, row, 2, code);
+                Set(ws, row, 3, seeBelow ? description + " (see below)" : description);
+                Set(ws, row, 4, n);
+                subtotal += n;
                 row++;
             }
-            ws.Cell(row, 4).Value = "Subtotal";
-            ws.Cell(row, 5).Value = subtotalInspectors;
-            ws.Cell(row, 6).Value = subtotalAttempts;
-            ws.Cell(row, 7).Value = subtotalSuccesses;
+            Set(ws, row, 2, SubtotalLabels[section]);
+            Set(ws, row, 5, subtotal);
+            grand += subtotal;
             row++;
         }
-        ws.Cell(row, 3).Value = "Total";
-        ws.Cell(row, 5).Value = report.Inspectors.Cells.Sum(c => c.InspectorCount);
-        ws.Cell(row, 6).Value = report.Inspectors.Cells.Sum(c => c.AttemptedBuys);
-        ws.Cell(row, 7).Value = report.Inspectors.Cells.Sum(c => c.SuccessfulBuys);
+        Set(ws, row, 2, "Grand Total");
+        Set(ws, row, 5, grand);
+
+        // SSES leaves a grid for the reasons behind N9 / I10 for the state to fill in.
+        row += 3;
+        if (otherNoncomplete)
+        {
+            Set(ws, row, 3, "Give reasons and counts for other noncompletion:");
+            Set(ws, row + 1, 3, "Reason");
+            Set(ws, row + 1, 4, "Count");
+            row += 7;
+        }
+        if (otherIneligible)
+        {
+            Set(ws, row, 3, "Give reasons and counts for other ineligibility:");
+            Set(ws, row + 1, 3, "Reason");
+            Set(ws, row + 1, 4, "Count");
+        }
     }
 
-    // Table 5: raw microdata passthrough. Headers match the SSES manual
-    // section 5 layout. Two columns (J Gender, K Age) have empty headers in
-    // the golden file -- we preserve that.
-    private static void WriteTable5(IXLWorksheet ws, SssReport report)
+    // ---------------------------------------------------------------- Table 4
+
+    private static void WriteTable4(IXLWorksheet ws, SssReport r)
+    {
+        var insp = r.Inspectors;
+        Set(ws, 1, 1, "SSES Table 4 (Synar Survey Inspection Results by Youth Inspector Characteristics)");
+        Set(ws, 3, 8, "STATE: " + r.StateCode);
+        Set(ws, 4, 8, "FFY: " + r.FederalFiscalYear);
+        Set(ws, 5, 3, "Frequency Distribution");
+        Set(ws, 6, 3, "Gender", "@");
+        Set(ws, 6, 4, "Age", "@");
+        Set(ws, 6, 5, "Number of Inspectors", "@");
+        Set(ws, 6, 6, "Attempted Buys", "@");
+        Set(ws, 6, 7, "Successful Buys", "@");
+
+        var row = 7;
+        var totals = new Dictionary<string, (int Attempts, int Sales)>();
+        foreach (var (g, label) in new[] { ("M", "Male"), ("F", "Female") })
+        {
+            Set(ws, row, 3, label);
+            int n = 0, att = 0, sales = 0;
+            foreach (var cell in insp.Cells.Where(c => c.Gender == g).OrderBy(c => c.Age))
+            {
+                Set(ws, row, 4, cell.Age);
+                Set(ws, row, 5, cell.InspectorCount);
+                Set(ws, row, 6, cell.AttemptedBuys);
+                Set(ws, row, 7, cell.SuccessfulBuys, Int);
+                n += cell.InspectorCount;
+                att += cell.AttemptedBuys;
+                sales += cell.SuccessfulBuys;
+                row++;
+            }
+            Set(ws, row, 4, "Subtotal");
+            Set(ws, row, 5, n);
+            Set(ws, row, 6, att);
+            Set(ws, row, 7, sales, Int);
+            totals[g] = (att, sales);
+            row++;
+        }
+
+        var hasOther = insp.OtherInspectorCount > 0;
+        Set(ws, row, 3, hasOther ? "Other (Explain below)" : "Other");
+        Set(ws, row, 5, insp.OtherInspectorCount);
+        Set(ws, row, 6, insp.OtherAttemptedBuys);
+        Set(ws, row, 7, insp.OtherSuccessfulBuys);
+        row++;
+        Set(ws, row, 3, "Grand Total");
+        Set(ws, row, 5, insp.TotalInspectorCount);
+        Set(ws, row, 6, totals["M"].Attempts + totals["F"].Attempts + insp.OtherAttemptedBuys);
+        Set(ws, row, 7, totals["M"].Sales + totals["F"].Sales + insp.OtherSuccessfulBuys);
+
+        // Buy rate by age and gender (CSPInspectors.Output_RatebyAge).
+        row += 2;
+        Set(ws, row++, 3, "Buy Rate in Percent by Age and Gender");
+        Set(ws, row, 3, "Age");
+        Set(ws, row, 5, "Male");
+        Set(ws, row, 6, "Female");
+        Set(ws, row, 7, "Total");
+        row++;
+        for (var age = 14; age <= 20; age++)
+        {
+            var m = insp.Cells.Single(c => c.Gender == "M" && c.Age == age);
+            var f = insp.Cells.Single(c => c.Gender == "F" && c.Age == age);
+            Set(ws, row, 3, age);
+            Set(ws, row, 5, Rate(m.SuccessfulBuys, m.AttemptedBuys), Pct1Rate);
+            Set(ws, row, 6, Rate(f.SuccessfulBuys, f.AttemptedBuys), Pct1Rate);
+            Set(ws, row, 7, Rate(m.SuccessfulBuys + f.SuccessfulBuys, m.AttemptedBuys + f.AttemptedBuys), Pct1Rate);
+            row++;
+        }
+        Set(ws, row, 3, "Other");
+        Set(ws, row, 7, Rate(insp.OtherSuccessfulBuys, insp.OtherAttemptedBuys), Pct1Rate);
+        row++;
+        // The total excludes "Other", as it does in SSES.
+        Set(ws, row, 3, "Total");
+        Set(ws, row, 5, Rate(totals["M"].Sales, totals["M"].Attempts), Pct1Rate);
+        Set(ws, row, 6, Rate(totals["F"].Sales, totals["F"].Attempts), Pct1Rate);
+        Set(ws, row, 7, Rate(totals["M"].Sales + totals["F"].Sales,
+                             totals["M"].Attempts + totals["F"].Attempts), Pct1Rate);
+
+        // SSES writes this note over the rate table's own "Total" label, which
+        // hides it; here it goes one row clear of the table instead.
+        if (hasOther) Set(ws, row + 2, 3, "*Explain values in Other category.");
+    }
+
+    private static double Rate(int sales, int attempts) =>
+        attempts > 0 ? (double)sales / attempts : 0;
+
+    // ---------------------------------------------------------------- Table 5
+
+    private static void WriteTable5(IXLWorksheet ws, SssReport r)
     {
         var headers = new[]
         {
-            "SynarFullID", "Stratum", "PopS", "Vstratum", "PopV",
-            "Code", "Viol", "Type", "IA#", "", "",
-            "VMsize", "Product", "Outlet", "Asked",
+            "SynarFullID", "Stratum", "PopS", "Vstratum", "PopV", "Code", "Viol", "Type", "IA#",
+            "Gender", "Age", "VMsize", "Product", "Outlet", "Asked",
         };
-        for (var i = 0; i < headers.Length; i++)
-            ws.Cell(1, i + 1).Value = headers[i];
+        for (var i = 0; i < headers.Length; i++) Set(ws, 1, i + 1, headers[i]);
 
         var row = 2;
-        foreach (var m in report.Microdata)
+        foreach (var m in r.Microdata)
         {
-            ws.Cell(row, 1).Value  = m.SynarFullId;
-            ws.Cell(row, 2).Value  = m.SamplingStratum;
-            ws.Cell(row, 3).Value  = m.SamplingStratumPopulation;
-            ws.Cell(row, 4).Value  = m.VarianceStratum;
-            ws.Cell(row, 5).Value  = m.VarianceStratumPopulation;
-            ws.Cell(row, 6).Value  = m.DispositionCode;
-            if (m.Violation == true) ws.Cell(row, 7).Value = 1;
-            ws.Cell(row, 8).Value  = m.OutletType ?? "";
-            ws.Cell(row, 9).Value  = m.InspectorId ?? "";
-            ws.Cell(row, 10).Value = m.InspectorGender ?? "";
-            if (m.InspectorAge.HasValue)     ws.Cell(row, 11).Value = m.InspectorAge.Value;
-            if (m.VmFrameSize.HasValue)      ws.Cell(row, 12).Value = m.VmFrameSize.Value;
-            if (m.ProductType.HasValue)      ws.Cell(row, 13).Value = m.ProductType.Value;
-            if (m.RetailOutletType.HasValue) ws.Cell(row, 14).Value = m.RetailOutletType.Value;
-            ws.Cell(row, 15).Value = m.AskedForId ?? "";
+            Set(ws, row, 1, m.SynarFullId);
+            Set(ws, row, 2, Id(m.SamplingStratum));
+            Set(ws, row, 3, m.SamplingStratumPopulation);
+            Set(ws, row, 4, Id(m.VarianceStratum));
+            Set(ws, row, 5, m.VarianceStratumPopulation);
+            Set(ws, row, 6, m.DispositionCode);
+            if (m.Violation == true) Set(ws, row, 7, 1);
+            if (!string.IsNullOrEmpty(m.OutletType)) Set(ws, row, 8, m.OutletType);
+            if (!string.IsNullOrEmpty(m.InspectorId)) Set(ws, row, 9, m.InspectorId);
+            if (!string.IsNullOrEmpty(m.InspectorGender)) Set(ws, row, 10, m.InspectorGender);
+            if (m.InspectorAge is int age) Set(ws, row, 11, age);
+            if (m.VmFrameSize is int vm) Set(ws, row, 12, vm);
+            if (m.ProductType is int product) Set(ws, row, 13, product);
+            if (m.RetailOutletType is int outlet) Set(ws, row, 14, outlet);
+            if (!string.IsNullOrEmpty(m.AskedForId)) Set(ws, row, 15, m.AskedForId);
             row++;
         }
     }
 
-    // Tables 6/7/8: cross-tabs. Left side is the frequency table (category x
-    // attempted/successful/rate); right side pivots violation rate by
-    // inspector age x gender. For v1 we emit the left side only -- the right
-    // side is an audit aid, not part of the headline submission, and the
-    // 2025 golden has all-zero pivots for KY (no asked-for-id captured).
-    // SAMHSA prints every category on Tables 6-8 whether or not the state has
-    // data for it, always in this order, with a Grand Total last. Categories
-    // are emitted from these lists rather than from whatever the data happens
-    // to contain, so a state with no ENDS checks still shows an ENDS row of
-    // zeros and the row positions stay stable year to year.
+    // ------------------------------------------------------------ Tables 6-8
+
+    // SAMHSA prints every category whether or not the state has data for it,
+    // in this order, so a state with no ENDS checks still shows an ENDS row
+    // of zeros and row positions stay stable from year to year.
     private static readonly string[] ProductCategories =
     {
         "Cigarettes", "Small cigars/Cigarillos", "Smokeless tobacco", "ENDS",
@@ -298,64 +385,99 @@ public sealed class SssWorkbookWriter
         "Yes", "No", "Missing", "Invalid",
     };
 
-    private static void WriteTable6(IXLWorksheet ws, SssReport report)
-        => WriteCrossTabFrequency(ws, "SSES Table 6 (Synar Survey Inspection Results by Product Type)",
-                                  "Product Type", ProductCategories, report.ProductCrossTab, report);
-
-    private static void WriteTable7(IXLWorksheet ws, SssReport report)
-        => WriteCrossTabFrequency(ws, "SSES Table 7 (Synar Survey Inspection Results by Retail Outlet Type)",
-                                  "Retail Outlet", RetailOutletCategories, report.OutletCrossTab, report);
-
-    private static void WriteTable8(IXLWorksheet ws, SssReport report)
-        => WriteCrossTabFrequency(ws, "SSES Table 8 (Synar Survey Inspection Results by Clerk Asked for ID)",
-                                  "Clerk Asked for ID", AskedForIdCategories, report.AskedForIdCrossTab, report);
-
-    private static void WriteCrossTabFrequency(IXLWorksheet ws, string title, string categoryLabel,
-                                               string[] categories, CrossTab tab, SssReport report)
+    private static void WriteCrossTab(IXLWorksheet ws, SssReport r, CrossTab tab,
+                                      string title, string pivotTitle, string[] categories)
     {
-        ws.Cell("A1").Value = title;
-        ws.Cell("D3").Value = $"STATE: {report.StateCode}";
-        ws.Cell("D4").Value = $"FFY: {report.FederalFiscalYear}";
-        ws.Cell("A7").Value = "Frequency Distribution and Buy Rate";
-        ws.Cell("A8").Value = categoryLabel;
-        ws.Cell("B8").Value = "Attempted Buys";
-        ws.Cell("C8").Value = "Successful Buys";
-        ws.Cell("D8").Value = "Violation Rate (%)";
+        Set(ws, 1, 1, title);
+        Set(ws, 1, 6, title);
+        Set(ws, 3, 4, "STATE: " + r.StateCode);
+        Set(ws, 4, 4, "FFY: " + r.FederalFiscalYear);
+        Set(ws, 3, 14, "STATE: " + r.StateCode);
+        Set(ws, 4, 14, "FFY: " + r.FederalFiscalYear);
 
-        var byCategory = tab.Rows.ToDictionary(r => r.Category, r => r);
+        // Left side: attempts and buys per category.
+        Set(ws, 7, 1, "Frequency Distribution and Buy Rate");
+        Set(ws, 8, 1, tab.CategoryLabel);
+        Set(ws, 8, 2, "Attempted Buys");
+        Set(ws, 8, 3, "Successful Buys");
+        Set(ws, 8, 4, "Violation Rate (%)");
+
+        var byCategory = tab.Rows.ToDictionary(x => x.Category);
         var row = 9;
-        int totalAttempts = 0, totalSuccesses = 0;
+        int totalAttempts = 0, totalSales = 0;
         foreach (var category in categories)
         {
-            byCategory.TryGetValue(category, out var r);
-            var attempts = r?.AttemptedBuys ?? 0;
-            var successes = r?.SuccessfulBuys ?? 0;
-            ws.Cell(row, 1).Value = category;
-            ws.Cell(row, 2).Value = attempts;
-            ws.Cell(row, 3).Value = successes;
-            ws.Cell(row, 4).Value = attempts > 0 ? (double)successes / attempts : 0;
-            totalAttempts  += attempts;
-            totalSuccesses += successes;
+            byCategory.TryGetValue(category, out var x);
+            var att = x?.AttemptedBuys ?? 0;
+            var sales = x?.SuccessfulBuys ?? 0;
+            Set(ws, row, 1, category);
+            Set(ws, row, 2, att);
+            Set(ws, row, 3, sales);
+            Set(ws, row, 4, Rate(sales, att), Pct1Short);
+            totalAttempts += att;
+            totalSales += sales;
             row++;
         }
-
-        // Any category the calculator produced that is not on SAMHSA's list
-        // would silently vanish from the workbook, so surface it rather than
-        // dropping buys out of the Grand Total.
-        foreach (var leftover in tab.Rows.Where(r => !categories.Contains(r.Category)))
+        // A category outside SAMHSA's list would otherwise vanish from the
+        // workbook and drop its buys out of the Grand Total.
+        foreach (var x in tab.Rows.Where(x => !categories.Contains(x.Category)))
         {
-            ws.Cell(row, 1).Value = leftover.Category + " (unmapped)";
-            ws.Cell(row, 2).Value = leftover.AttemptedBuys;
-            ws.Cell(row, 3).Value = leftover.SuccessfulBuys;
-            ws.Cell(row, 4).Value = leftover.ViolationRate;
-            totalAttempts  += leftover.AttemptedBuys;
-            totalSuccesses += leftover.SuccessfulBuys;
+            Set(ws, row, 1, x.Category + " (unmapped)");
+            Set(ws, row, 2, x.AttemptedBuys);
+            Set(ws, row, 3, x.SuccessfulBuys);
+            Set(ws, row, 4, x.ViolationRate, Pct1Short);
+            totalAttempts += x.AttemptedBuys;
+            totalSales += x.SuccessfulBuys;
             row++;
         }
+        Set(ws, row, 1, "Grand Total");
+        Set(ws, row, 2, totalAttempts);
+        Set(ws, row, 3, totalSales);
+        Set(ws, row, 4, Rate(totalSales, totalAttempts), Pct1Short);
 
-        ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = totalAttempts;
-        ws.Cell(row, 3).Value = totalSuccesses;
-        ws.Cell(row, 4).Value = totalAttempts > 0 ? (double)totalSuccesses / totalAttempts : 0;
+        // Right side: buy rate by category, age and gender, in three blocks.
+        Set(ws, 6, 6, pivotTitle);
+        var stride = categories.Length + 6;
+        var blocks = new[]
+        {
+            (Label: "Male", Total: "Total Male", Genders: new[] { "M" }),
+            (Label: "Female", Total: "Total Female", Genders: new[] { "F" }),
+            (Label: "All", Total: "Grand Total", Genders: new[] { "M", "F" }),
+        };
+        for (var b = 0; b < blocks.Length; b++)
+        {
+            var (label, totalLabel, genders) = blocks[b];
+            var top = 7 + b * stride;
+            Set(ws, top, 6, label);
+            Set(ws, top + 1, 6, tab.CategoryLabel);
+            Set(ws, top + 1, 7, "Age");
+            Set(ws, top + 1, 14, "Total");
+            for (var a = 14; a <= 20; a++) Set(ws, top + 2, a - 7, a);
+
+            var line = top + 3;
+            foreach (var category in categories.Append<string?>(null))
+            {
+                Set(ws, line, 6, category ?? totalLabel);
+                for (var a = 14; a <= 20; a++)
+                    Set(ws, line, a - 7, PivotRate(tab, category, genders, a), Pct1Short);
+                Set(ws, line, 14, PivotRate(tab, category, genders, null), Pct1Short);
+                line++;
+            }
+        }
+    }
+
+    // CSPProducts.Output_BuyRate: rates on the right-hand pivot are stored
+    // rounded to three places (VBA Round, which rounds half to even).
+    private static double PivotRate(CrossTab tab, string? category, string[] genders, int? age)
+    {
+        var total = new BuyCount(0, 0);
+        foreach (var g in genders)
+        {
+            if (tab.Pivot.TryGetValue(new PivotKey(category, g, age), out var c))
+                total = total.Add(c);
+        }
+        return total.Attempts > 0
+            ? Math.Round((double)total.Sales / total.Attempts, 3, MidpointRounding.ToEven)
+            : 0;
     }
 }
